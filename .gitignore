@@ -1,6 +1,6 @@
 # Binaries
-gateway
-worker
+/gateway
+/worker
 *.exe
 *.exe~
 *.dll
