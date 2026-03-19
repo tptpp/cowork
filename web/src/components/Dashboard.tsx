@@ -59,7 +59,7 @@ export function Dashboard() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(1200)
 
-  const { widgets, isEditing, updateLayout, toggleEditing, resetToDefault } = useLayoutStore()
+  const { widgets, isEditing, updateLayout, toggleEditing, resetToDefault, loadLayout, saveLayout } = useLayoutStore()
   const { fetchStats } = useSystemStore()
   const { fetchTasks, updateTask } = useTaskStore()
   const { fetchWorkers, updateWorker } = useWorkerStore()
@@ -77,6 +77,11 @@ export function Dashboard() {
       }
     },
   })
+
+  // Load layout from server on mount
+  useEffect(() => {
+    loadLayout()
+  }, [loadLayout])
 
   useEffect(() => {
     fetchStats()
@@ -134,6 +139,8 @@ export function Dashboard() {
     newLayout.forEach((l) => {
       updateLayout(l.i, { x: l.x, y: l.y, w: l.w, h: l.h })
     })
+    // Save to backend
+    saveLayout()
   }
 
   return (

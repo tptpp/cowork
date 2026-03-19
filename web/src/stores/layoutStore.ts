@@ -2,6 +2,9 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { WidgetConfig, WidgetType, GridLayoutItem, WidgetDefinition } from '@/types'
 
+// API base URL
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+
 // Widget registry with definitions
 export const WIDGET_REGISTRY: Record<WidgetType, WidgetDefinition> = {
   'system-stats': {
@@ -55,6 +58,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
 interface LayoutState {
   widgets: WidgetConfig[]
   isEditing: boolean
+  isLoaded: boolean
 
   // Actions
   setWidgets: (widgets: WidgetConfig[]) => void
@@ -63,6 +67,10 @@ interface LayoutState {
   updateLayout: (id: string, layout: GridLayoutItem) => void
   toggleEditing: () => void
   resetToDefault: () => void
+
+  // Persistence
+  loadLayout: () => Promise<void>
+  saveLayout: () => Promise<void>
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -70,6 +78,7 @@ export const useLayoutStore = create<LayoutState>()(
     (set, get) => ({
       widgets: DEFAULT_WIDGETS,
       isEditing: false,
+      isLoaded: false,
 
       setWidgets: (widgets) => set({ widgets }),
 
@@ -114,6 +123,47 @@ export const useLayoutStore = create<LayoutState>()(
         set((state) => ({ isEditing: !state.isEditing })),
 
       resetToDefault: () => set({ widgets: DEFAULT_WIDGETS }),
+
+      loadLayout: async () => {
+        try {
+          const response = await fetch(`${API_BASE}/api/user/layout`)
+          if (!response.ok) {
+            throw new Error('Failed to load layout')
+          }
+
+          const data = await response.json()
+          if (data.success && data.data?.widgets) {
+            // Convert widgets array to proper format
+            const widgets = Array.isArray(data.data.widgets)
+              ? data.data.widgets
+              : []
+
+            if (widgets.length > 0) {
+              set({ widgets, isLoaded: true })
+            } else {
+              // Use default widgets if server returns empty
+              set({ widgets: DEFAULT_WIDGETS, isLoaded: true })
+            }
+          }
+        } catch (error) {
+          console.error('Failed to load layout from server:', error)
+          // Keep using localStorage cached layout
+          set({ isLoaded: true })
+        }
+      },
+
+      saveLayout: async () => {
+        const { widgets } = get()
+        try {
+          await fetch(`${API_BASE}/api/user/layout`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ widgets }),
+          })
+        } catch (error) {
+          console.error('Failed to save layout to server:', error)
+        }
+      },
     }),
     {
       name: 'cowork-layout',
