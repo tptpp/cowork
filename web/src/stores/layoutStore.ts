@@ -31,6 +31,14 @@ export const WIDGET_REGISTRY: Record<WidgetType, WidgetDefinition> = {
     defaultSize: { w: 6, h: 4 },
     minSize: { w: 4, h: 3 },
   },
+  'agent-chat': {
+    type: 'agent-chat',
+    name: 'Agent Chat',
+    icon: 'MessageSquare',
+    description: 'Chat with AI agent',
+    defaultSize: { w: 6, h: 5 },
+    minSize: { w: 4, h: 4 },
+  },
 }
 
 // Default widgets configuration

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, BarChart3, ListTodo, Users } from 'lucide-react'
+import { Search, BarChart3, ListTodo, Users, MessageSquare } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   BarChart3,
   ListTodo,
   Users,
+  MessageSquare,
 }
 
 interface WidgetStoreProps {

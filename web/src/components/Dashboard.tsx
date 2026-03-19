@@ -20,6 +20,7 @@ import {
   TaskQueueWidget,
   WorkerStatusWidget,
 } from '@/components/widgets'
+import { AgentChatWidget } from '@/components/widgets/AgentChatWidget'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { useSystemStore } from '@/stores/systemStore'
@@ -41,6 +42,8 @@ function WidgetRenderer({ widget, onSelectTask }: { widget: WidgetConfig; onSele
       return <TaskQueueWidget onSelectTask={onSelectTask} />
     case 'worker-status':
       return <WorkerStatusWidget />
+    case 'agent-chat':
+      return <AgentChatWidget />
     default:
       return (
         <div className="flex items-center justify-center h-full text-muted-foreground">

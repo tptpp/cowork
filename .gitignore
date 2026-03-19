@@ -1,6 +1,8 @@
 # Binaries
 /gateway
 /worker
+/cowork-gateway
+/bin/
 *.exe
 *.exe~
 *.dll

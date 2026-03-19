@@ -91,6 +91,7 @@ export type WidgetType =
   | 'system-stats'
   | 'task-queue'
   | 'worker-status'
+  | 'agent-chat'
 
 export interface GridLayoutItem {
   x: number
@@ -117,4 +118,25 @@ export interface WidgetDefinition {
   description: string
   defaultSize: { w: number; h: number }
   minSize?: { w: number; h: number }
+}
+
+// Agent types
+export interface AgentSession {
+  id: string
+  model: string
+  system_prompt: string
+  context: Record<string, unknown>
+  task_id: string | null
+  config: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentMessage {
+  id: number
+  session_id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  tokens: number
+  created_at: string
 }
