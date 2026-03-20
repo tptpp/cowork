@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, BarChart3, ListTodo, Users, MessageSquare } from 'lucide-react'
+import { Search, BarChart3, ListTodo, Users, MessageSquare, Sparkles } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -9,6 +9,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { useLayoutStore, WIDGET_REGISTRY } from '@/stores/layoutStore'
 import type { WidgetType } from '@/types'
+import { cn } from '@/lib/utils'
 
 // Icon mapping
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -16,6 +17,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   ListTodo,
   Users,
   MessageSquare,
+  Sparkles,
 }
 
 interface WidgetStoreProps {
@@ -42,7 +44,7 @@ export function WidgetStore({ open, onClose }: WidgetStoreProps) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Widget</DialogTitle>
+          <DialogTitle className="text-lg">Add Widget</DialogTitle>
         </DialogHeader>
 
         <div className="relative mb-4">
@@ -55,27 +57,31 @@ export function WidgetStore({ open, onClose }: WidgetStoreProps) {
           />
         </div>
 
-        <div className="grid gap-3 max-h-80 overflow-auto">
+        <div className="grid gap-2 max-h-80 overflow-auto">
           {widgets.map((widget) => {
             const Icon = ICON_MAP[widget.icon] || BarChart3
             return (
-              <div
+              <button
                 key={widget.type}
-                className="p-4 border rounded-lg hover:bg-accent cursor-pointer transition-colors"
                 onClick={() => handleAdd(widget.type)}
+                className={cn(
+                  'w-full p-3 rounded-xl border text-left transition-all',
+                  'hover:border-primary/50 hover:bg-accent/50 hover:shadow-sm',
+                  'active:scale-[0.98]'
+                )}
               >
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-muted rounded-lg">
-                    <Icon className="h-5 w-5" />
+                  <div className="p-2.5 bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg">
+                    <Icon className="h-5 w-5 text-primary" />
                   </div>
-                  <div>
-                    <div className="font-medium">{widget.name}</div>
-                    <p className="text-sm text-muted-foreground">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm">{widget.name}</div>
+                    <p className="text-xs text-muted-foreground truncate">
                       {widget.description}
                     </p>
                   </div>
                 </div>
-              </div>
+              </button>
             )
           })}
         </div>

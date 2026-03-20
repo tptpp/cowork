@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { ResponsiveGridLayout } from 'react-grid-layout'
 import type { Layout, ResponsiveLayouts } from 'react-grid-layout'
-import { Plus, LayoutDashboard, List, Settings, RotateCcw } from 'lucide-react'
+import { Plus, LayoutDashboard, List, Settings, RotateCcw, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -23,6 +23,7 @@ import {
 import { AgentChatWidget } from '@/components/widgets/AgentChatWidget'
 import { NotificationWidget } from '@/components/widgets/NotificationWidget'
 import { ToastContainer } from '@/components/ui/Toast'
+import { SettingsPage } from '@/components/Settings'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { useSystemStore } from '@/stores/systemStore'
@@ -33,7 +34,7 @@ import type { Task, WSMessage, Worker, WidgetConfig } from '@/types'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
-type ViewMode = 'dashboard' | 'tasks'
+type ViewMode = 'dashboard' | 'tasks' | 'settings'
 
 // Widget renderer component
 function WidgetRenderer({ widget, onSelectTask }: { widget: WidgetConfig; onSelectTask: (task: Task) => void }) {
@@ -148,52 +149,78 @@ export function Dashboard() {
     saveLayout()
   }
 
+  // Render Settings page
+  if (viewMode === 'settings') {
+    return <SettingsPage onBack={() => setViewMode('dashboard')} />
+  }
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 items-center justify-between px-4">
+      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-16 items-center justify-between px-4">
+          {/* Logo and Brand */}
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold">Cowork</h1>
-            <Badge variant="secondary" className="text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+                <Zap className="w-4 h-4 text-primary-foreground" />
+              </div>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
+                Cowork
+              </h1>
+            </div>
+            <Badge variant="secondary" className="text-xs font-normal hidden sm:inline-flex">
               Distributed Task Processing
             </Badge>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Navigation */}
+          <div className="flex items-center gap-3">
             {/* Notification Bell */}
             <NotificationWidget />
 
             {/* View Mode Toggle */}
-            <div className="flex items-center border rounded-lg p-1">
+            <div className="flex items-center bg-muted/50 rounded-lg p-1">
               <Button
                 variant={viewMode === 'dashboard' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setViewMode('dashboard')}
-                className="gap-1"
+                className="gap-1.5 rounded-md"
               >
                 <LayoutDashboard className="w-4 h-4" />
-                Dashboard
+                <span className="hidden sm:inline">Dashboard</span>
               </Button>
               <Button
                 variant={viewMode === 'tasks' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setViewMode('tasks')}
-                className="gap-1"
+                className="gap-1.5 rounded-md"
               >
                 <List className="w-4 h-4" />
-                Tasks
+                <span className="hidden sm:inline">Tasks</span>
               </Button>
             </div>
+
+            {/* Settings Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setViewMode('settings')}
+              className="rounded-lg"
+              title="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </Button>
 
             {/* Edit Mode Toggle (only in dashboard view) */}
             {viewMode === 'dashboard' && (
               <>
+                <div className="w-px h-6 bg-border mx-1" />
                 <Button
                   variant={isEditing ? 'default' : 'outline'}
                   size="sm"
                   onClick={toggleEditing}
-                  className="gap-1"
+                  className="gap-1.5"
                 >
                   <Settings className="w-4 h-4" />
                   {isEditing ? 'Done' : 'Edit'}
@@ -205,19 +232,18 @@ export function Dashboard() {
                       variant="outline"
                       size="sm"
                       onClick={() => setShowWidgetStore(true)}
-                      className="gap-1"
+                      className="gap-1.5"
                     >
                       <Plus className="w-4 h-4" />
-                      Add Widget
+                      Widget
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={resetToDefault}
-                      className="gap-1"
+                      className="gap-1.5"
                     >
                       <RotateCcw className="w-4 h-4" />
-                      Reset
                     </Button>
                   </>
                 )}
@@ -225,9 +251,9 @@ export function Dashboard() {
             )}
 
             {/* Quick Create Task Button */}
-            <Button onClick={() => setShowTaskForm(true)} className="gap-1">
+            <Button onClick={() => setShowTaskForm(true)} className="gap-1.5 shadow-lg shadow-primary/20">
               <Plus className="w-4 h-4" />
-              New Task
+              <span className="hidden sm:inline">New Task</span>
             </Button>
           </div>
         </div>
@@ -262,9 +288,13 @@ export function Dashboard() {
             {widgets.length === 0 && (
               <div className="flex items-center justify-center h-64 text-muted-foreground">
                 <div className="text-center">
-                  <p className="mb-2">No widgets configured</p>
-                  <Button onClick={() => setShowWidgetStore(true)}>
-                    <Plus className="w-4 h-4 mr-2" />
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-muted flex items-center justify-center">
+                    <LayoutDashboard className="w-8 h-8 opacity-50" />
+                  </div>
+                  <p className="mb-2 font-medium">No widgets configured</p>
+                  <p className="text-sm text-muted-foreground mb-4">Add widgets to customize your dashboard</p>
+                  <Button onClick={() => setShowWidgetStore(true)} className="gap-2">
+                    <Plus className="w-4 h-4" />
                     Add Widget
                   </Button>
                 </div>

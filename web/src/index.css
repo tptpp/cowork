@@ -3,48 +3,63 @@
 @tailwind utilities;
 
 :root {
+  /* Modern purple-blue gradient theme */
   --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
+  --foreground: 224 71.4% 4.1%;
   --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
+  --card-foreground: 224 71.4% 4.1%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 262.1 83.3% 57.8%;
+  --popover-foreground: 224 71.4% 4.1%;
+  --primary: 262 83% 58%;
   --primary-foreground: 210 20% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
+  --secondary: 220 14.3% 95.9%;
+  --secondary-foreground: 220.9 39.3% 11%;
+  --muted: 220 14.3% 95.9%;
+  --muted-foreground: 220 8.9% 46.1%;
+  --accent: 220 14.3% 95.9%;
+  --accent-foreground: 220.9 39.3% 11%;
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 210 20% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 262.1 83.3% 57.8%;
-  --radius: 0.5rem;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 262 83% 58%;
+  --radius: 0.75rem;
+
+  /* Chart colors */
+  --chart-1: 262 83% 58%;
+  --chart-2: 220 70% 50%;
+  --chart-3: 197 37% 24%;
+  --chart-4: 43 74% 66%;
+  --chart-5: 27 87% 67%;
 }
 
 .dark {
-  --background: 223 47% 11%;
+  --background: 224 71.4% 4.1%;
   --foreground: 210 20% 98%;
-  --card: 223 47% 11%;
+  --card: 224 71.4% 6%;
   --card-foreground: 210 20% 98%;
-  --popover: 223 47% 11%;
+  --popover: 224 71.4% 6%;
   --popover-foreground: 210 20% 98%;
-  --primary: 263.4 70% 50.4%;
+  --primary: 263 70% 50%;
   --primary-foreground: 210 20% 98%;
-  --secondary: 222.2 47.4% 11.2%;
+  --secondary: 215 27.9% 16.9%;
   --secondary-foreground: 210 20% 98%;
-  --muted: 223 47% 11%;
-  --muted-foreground: 215.4 16.3% 56.9%;
-  --accent: 216 34% 17%;
+  --muted: 215 27.9% 16.9%;
+  --muted-foreground: 217.9 10.6% 64.9%;
+  --accent: 215 27.9% 16.9%;
   --accent-foreground: 210 20% 98%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 210 20% 98%;
-  --border: 216 34% 17%;
-  --input: 216 34% 17%;
-  --ring: 263.4 70% 50.4%;
+  --border: 215 27.9% 16.9%;
+  --input: 215 27.9% 16.9%;
+  --ring: 263 70% 50%;
+
+  /* Chart colors - dark mode */
+  --chart-1: 263 70% 50%;
+  --chart-2: 220 70% 50%;
+  --chart-3: 30 80% 55%;
+  --chart-4: 280 65% 60%;
+  --chart-5: 340 75% 55%;
 }
 
 * {
@@ -54,5 +69,171 @@
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Selection color */
+::selection {
+  background: hsl(var(--primary) / 0.2);
+  color: hsl(var(--foreground));
+}
+
+/* Focus ring style */
+*:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.2s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Gradient text utility */
+.gradient-text {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(280 70% 50%) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glass effect */
+.glass {
+  background: hsl(var(--background) / 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Shimmer animation for loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--muted) / 0.5) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Message bubble styles */
+.message-bubble {
+  position: relative;
+  word-wrap: break-word;
+}
+
+.message-bubble-user {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(280 70% 55%) 100%);
+  color: hsl(var(--primary-foreground));
+  border-radius: 1rem 1rem 0.25rem 1rem;
+}
+
+.message-bubble-assistant {
+  background: hsl(var(--muted));
+  border-radius: 1rem 1rem 1rem 0.25rem;
+}
+
+/* Typing indicator dots */
+.typing-dot {
+  animation: typingBounce 1.4s ease-in-out infinite both;
+}
+
+.typing-dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes typingBounce {
+  0%, 80%, 100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Typing cursor animation */
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+/* Animate pulse soft */
+@keyframes pulseSoft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* Thin scrollbar for specific elements */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.15);
+  border-radius: 2px;
+}
+
+/* Better placeholder styles */
+::placeholder {
+  color: hsl(var(--muted-foreground) / 0.7);
+}
+
+/* Smooth transitions for theme changes */
+html {
+  transition: background-color 0.2s ease, color 0.2s ease;
 }

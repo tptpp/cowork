@@ -1,21 +1,21 @@
-import { Server, Wifi, WifiOff } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Server, Wifi, WifiOff, Circle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useWorkerStore } from '@/stores/workerStore'
 import type { Worker } from '@/types'
+import { cn } from '@/lib/utils'
 
-const getStatusColor = (status: string) => {
+const getStatusConfig = (status: string) => {
   switch (status) {
     case 'idle':
-      return 'text-green-500'
+      return { color: 'text-green-500', bg: 'bg-green-500/10', dot: 'bg-green-500' }
     case 'busy':
-      return 'text-blue-500'
+      return { color: 'text-blue-500', bg: 'bg-blue-500/10', dot: 'bg-blue-500' }
     case 'offline':
-      return 'text-muted-foreground'
+      return { color: 'text-muted-foreground', bg: 'bg-muted', dot: 'bg-muted-foreground' }
     case 'error':
-      return 'text-destructive'
+      return { color: 'text-destructive', bg: 'bg-destructive/10', dot: 'bg-destructive' }
     default:
-      return 'text-muted-foreground'
+      return { color: 'text-muted-foreground', bg: 'bg-muted', dot: 'bg-muted-foreground' }
   }
 }
 
@@ -46,87 +46,82 @@ export function WorkerStatusWidget({ onSelectWorker }: WorkerStatusWidgetProps) 
 
   if (workers.length === 0) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Server className="w-5 h-5" />
-            Workers
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-center py-8">
-            No workers registered
-          </p>
-        </CardContent>
-      </Card>
+      <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-4">
+        <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-3">
+          <Server className="w-6 h-6 opacity-50" />
+        </div>
+        <p className="text-sm font-medium">No workers</p>
+        <p className="text-xs text-muted-foreground">No workers registered</p>
+      </div>
     )
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <Server className="w-5 h-5" />
-            Workers
-          </span>
-          <div className="flex items-center gap-2 text-sm font-normal">
-            <Wifi className="w-4 h-4 text-green-500" />
-            <span>{onlineWorkers.length}</span>
-            <WifiOff className="w-4 h-4 text-muted-foreground ml-2" />
-            <span>{offlineWorkers.length}</span>
+    <div className="h-full flex flex-col p-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Server className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium">Workers</span>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-1">
+            <Wifi className="w-3 h-3 text-green-500" />
+            <span className="font-medium">{onlineWorkers.length}</span>
           </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          {loading ? (
-            <p className="text-muted-foreground text-center py-4">Loading...</p>
-          ) : (
-            workers.map((worker) => (
+          <div className="flex items-center gap-1">
+            <WifiOff className="w-3 h-3 text-muted-foreground" />
+            <span className="text-muted-foreground">{offlineWorkers.length}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Worker List */}
+      <div className="flex-1 overflow-auto space-y-2">
+        {loading ? (
+          <div className="text-center text-muted-foreground text-sm py-4">
+            Loading...
+          </div>
+        ) : (
+          workers.map((worker) => {
+            const config = getStatusConfig(worker.status)
+            return (
               <div
                 key={worker.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted cursor-pointer transition-colors"
                 onClick={() => onSelectWorker?.(worker)}
+                className={cn(
+                  'flex items-center gap-3 p-3 rounded-xl border border-border/50 bg-muted/30',
+                  'hover:bg-muted/50 hover:border-primary/30 cursor-pointer transition-all',
+                  'active:scale-[0.98]'
+                )}
               >
-                <div className="flex items-center gap-3">
-                  <Server className={`w-4 h-4 ${getStatusColor(worker.status)}`} />
-                  <div>
-                    <div className="font-medium">{worker.name}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {worker.model}
-                    </div>
-                  </div>
+                <div className={cn('p-2 rounded-lg', config.bg)}>
+                  <Server className={cn('w-4 h-4', config.color)} />
                 </div>
-                <div className="flex items-center gap-3">
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm truncate">{worker.name}</span>
+                    <Circle className={cn('w-2 h-2 fill-current', config.dot, config.color)} />
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">{worker.model}</p>
+                </div>
+
+                <div className="flex items-center gap-2">
                   <div className="text-right">
-                    <Badge variant={getStatusBadgeVariant(worker.status)}>
+                    <Badge variant={getStatusBadgeVariant(worker.status)} className="text-xs px-1.5 py-0 h-4">
                       {worker.status}
                     </Badge>
-                    <div className="text-xs text-muted-foreground mt-1">
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       {worker.completed_tasks} tasks
-                    </div>
+                    </p>
                   </div>
-                  {worker.tags.length > 0 && (
-                    <div className="flex gap-1 flex-wrap max-w-32">
-                      {worker.tags.slice(0, 2).map((tag) => (
-                        <Badge key={tag} variant="outline" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
-                      {worker.tags.length > 2 && (
-                        <Badge variant="outline" className="text-xs">
-                          +{worker.tags.length - 2}
-                        </Badge>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
-            ))
-          )}
-        </div>
-      </CardContent>
-    </Card>
+            )
+          })
+        )}
+      </div>
+    </div>
   )
 }
