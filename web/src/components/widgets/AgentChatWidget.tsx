@@ -1,11 +1,28 @@
-import { useState, useRef, useEffect } from 'react'
-import { Send, Plus, Trash2, MessageSquare, Loader2, Bot, User, Sparkles } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import {
+  Send,
+  Plus,
+  Trash2,
+  MessageSquare,
+  Loader2,
+  Bot,
+  User,
+  Sparkles,
+  Wrench,
+  AlertCircle,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { useAgentStore } from '@/stores/agentStore'
 import { cn } from '@/lib/utils'
+import {
+  ToolCallsList,
+  PendingToolsBadge,
+} from '@/components/agent/ToolCallDisplay'
+import { ToolApprovalModal } from '@/components/agent/ToolApprovalModal'
+import type { ToolCall, ToolExecution } from '@/types'
 
 const MODEL_OPTIONS = [
   { value: 'default', label: 'Default (Auto)' },
@@ -25,17 +42,53 @@ function TypingIndicator() {
   )
 }
 
+// Tool execution indicator
+function ToolExecutionIndicator({ toolName }: { toolName: string }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-700 dark:text-blue-300 text-sm">
+      <Wrench className="w-4 h-4" />
+      <span className="font-medium">Executing:</span>
+      <code className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded text-xs font-mono">
+        {toolName}
+      </code>
+      <Loader2 className="w-4 h-4 animate-spin ml-1" />
+    </div>
+  )
+}
+
 // Message bubble component
 function MessageBubble({
   role,
   content,
-  isStreaming
+  isStreaming,
+  toolCalls,
+  toolExecutions,
 }: {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   isStreaming?: boolean
+  toolCalls?: ToolCall[]
+  toolExecutions?: ToolExecution[]
 }) {
   const isUser = role === 'user'
+  const isTool = role === 'tool'
+
+  // For tool role messages
+  if (isTool) {
+    return (
+      <div className="flex gap-2 max-w-[85%]">
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+          <Wrench className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs text-muted-foreground mb-1">Tool Result</div>
+          <div className="bg-muted/50 rounded-lg p-3 text-sm font-mono overflow-x-auto">
+            <pre className="whitespace-pre-wrap break-all">{content}</pre>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={cn('flex gap-2 max-w-[85%]', isUser ? 'ml-auto flex-row-reverse' : '')}>
@@ -52,27 +105,45 @@ function MessageBubble({
       </div>
 
       {/* Message content */}
-      <div
-        className={cn(
-          'message-bubble px-3.5 py-2.5 text-sm leading-relaxed',
-          isUser
-            ? 'message-bubble-user shadow-md shadow-primary/20'
-            : 'message-bubble-assistant',
-          isStreaming && 'animate-pulse-soft'
+      <div className="flex-1 min-w-0 space-y-2">
+        {/* Tool calls display */}
+        {toolCalls && toolCalls.length > 0 && (
+          <ToolCallsList
+            toolCalls={toolCalls}
+            executions={toolExecutions || []}
+          />
         )}
-      >
-        {content}
-        {isStreaming && (
-          <span className="inline-block w-1.5 h-4 ml-0.5 bg-current opacity-60 animate-pulse" />
+
+        {/* Text content */}
+        {content && (
+          <div
+            className={cn(
+              'message-bubble px-3.5 py-2.5 text-sm leading-relaxed',
+              isUser
+                ? 'message-bubble-user shadow-md shadow-primary/20'
+                : 'message-bubble-assistant',
+              isStreaming && 'animate-pulse-soft'
+            )}
+          >
+            {content}
+            {isStreaming && (
+              <span className="inline-block w-1.5 h-4 ml-0.5 bg-current opacity-60 animate-pulse" />
+            )}
+          </div>
         )}
       </div>
     </div>
   )
 }
 
+// Need to import ToolExecution type
+import type { ToolExecution } from '@/types'
+
 export function AgentChatWidget() {
   const [input, setInput] = useState('')
   const [selectedModel, setSelectedModel] = useState('default')
+  const [showApprovalModal, setShowApprovalModal] = useState(false)
+  const [currentApprovalToolCall, setCurrentApprovalToolCall] = useState<ToolCall | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -82,28 +153,45 @@ export function AgentChatWidget() {
     isStreaming,
     streamingContent,
     isLoading,
+    pendingToolCalls,
+    toolExecutions,
+    isExecutingTool,
     fetchSessions,
     createSession,
     selectSession,
     deleteSession,
-    sendMessage,
+    sendMessageWithTools,
+    approveToolCall,
+    fetchAvailableTools,
+    clearToolState,
+    error,
   } = useAgentStore()
 
-  // Fetch sessions on mount
+  // Fetch sessions and tools on mount
   useEffect(() => {
     fetchSessions()
-  }, [fetchSessions])
+    fetchAvailableTools()
+  }, [fetchSessions, fetchAvailableTools])
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingContent])
+  }, [messages, streamingContent, pendingToolCalls])
+
+  // Handle pending tool calls for approval
+  useEffect(() => {
+    if (pendingToolCalls.length > 0 && !showApprovalModal) {
+      // Show approval modal for the first pending tool call
+      setCurrentApprovalToolCall(pendingToolCalls[0])
+      setShowApprovalModal(true)
+    }
+  }, [pendingToolCalls, showApprovalModal])
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming) return
     const content = input.trim()
     setInput('')
-    await sendMessage(content)
+    await sendMessageWithTools(content)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -114,17 +202,42 @@ export function AgentChatWidget() {
   }
 
   const handleNewSession = async () => {
+    clearToolState()
     await createSession(selectedModel)
   }
 
   const handleModelChange = async (newModel: string) => {
     setSelectedModel(newModel)
+    clearToolState()
     await createSession(newModel)
   }
 
   const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     await deleteSession(id)
+  }
+
+  const handleApprove = useCallback(
+    async (approved: boolean) => {
+      if (!currentApprovalToolCall) return
+
+      await approveToolCall(currentApprovalToolCall.id, approved)
+      setShowApprovalModal(false)
+      setCurrentApprovalToolCall(null)
+    },
+    [currentApprovalToolCall, approveToolCall]
+  )
+
+  const handleCloseApproval = useCallback(() => {
+    setShowApprovalModal(false)
+    setCurrentApprovalToolCall(null)
+  }, [])
+
+  // Get tool executions for a specific message
+  const getToolExecutionsForMessage = (toolCalls: ToolCall[]): ToolExecution[] => {
+    return toolExecutions.filter((e) =>
+      toolCalls.some((tc) => tc.id === e.tool_call_id)
+    )
   }
 
   return (
@@ -138,11 +251,13 @@ export function AgentChatWidget() {
             <div className="flex flex-col">
               <span className="text-base font-semibold">Agent Chat</span>
               <span className="text-xs font-normal text-muted-foreground">
-                AI-powered assistant
+                AI-powered assistant with tools
               </span>
             </div>
           </span>
           <div className="flex items-center gap-2">
+            {/* Pending tools badge */}
+            <PendingToolsBadge count={pendingToolCalls.length} />
             <Select
               value={selectedModel}
               onChange={(e) => handleModelChange(e.target.value)}
@@ -156,6 +271,7 @@ export function AgentChatWidget() {
               onClick={handleNewSession}
               title="New Session"
               className="h-8 w-8"
+              disabled={isStreaming}
             >
               <Plus className="w-4 h-4" />
             </Button>
@@ -195,6 +311,14 @@ export function AgentChatWidget() {
           </div>
         )}
 
+        {/* Error display */}
+        {error && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800 text-sm">
+            <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+            <span className="text-red-700 dark:text-red-300">{error}</span>
+          </div>
+        )}
+
         {/* Messages Area */}
         <div className="flex-1 min-h-0 border rounded-xl bg-background/50 overflow-y-auto">
           <div className="p-4 space-y-4">
@@ -207,6 +331,10 @@ export function AgentChatWidget() {
                 <p className="text-xs text-muted-foreground mt-1">
                   Select a model and send your first message
                 </p>
+                <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Wrench className="w-4 h-4" />
+                  <span>Tool calling enabled</span>
+                </div>
               </div>
             )}
 
@@ -215,6 +343,12 @@ export function AgentChatWidget() {
                 key={message.id}
                 role={message.role}
                 content={message.content}
+                toolCalls={message.tool_calls}
+                toolExecutions={
+                  message.tool_calls
+                    ? getToolExecutionsForMessage(message.tool_calls)
+                    : undefined
+                }
               />
             ))}
 
@@ -227,7 +361,16 @@ export function AgentChatWidget() {
               />
             )}
 
-            {isStreaming && !streamingContent && (
+            {/* Tool execution indicator */}
+            {isExecutingTool && toolExecutions.some((e) => e.status === 'running') && (
+              <ToolExecutionIndicator
+                toolName={
+                  toolExecutions.find((e) => e.status === 'running')?.tool_name || 'tool'
+                }
+              />
+            )}
+
+            {isStreaming && !streamingContent && !isExecutingTool && (
               <div className="flex gap-2">
                 <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary/80 to-primary text-primary-foreground flex items-center justify-center">
                   <Bot className="w-3.5 h-3.5" />
@@ -272,6 +415,15 @@ export function AgentChatWidget() {
           </Button>
         </div>
       </CardContent>
+
+      {/* Tool Approval Modal */}
+      {showApprovalModal && currentApprovalToolCall && (
+        <ToolApprovalModal
+          toolCall={currentApprovalToolCall}
+          onApprove={handleApprove}
+          onClose={handleCloseApproval}
+        />
+      )}
     </Card>
   )
 }
