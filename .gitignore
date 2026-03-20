@@ -2,6 +2,9 @@
 /gateway
 /worker
 /cowork-gateway
+/coordinator
+/coordinator-test
+/test-build
 /bin/
 *.exe
 *.exe~
