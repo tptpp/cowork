@@ -21,6 +21,8 @@ import {
   WorkerStatusWidget,
 } from '@/components/widgets'
 import { AgentChatWidget } from '@/components/widgets/AgentChatWidget'
+import { NotificationWidget } from '@/components/widgets/NotificationWidget'
+import { ToastContainer } from '@/components/ui/Toast'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { useTaskStore } from '@/stores/taskStore'
 import { useSystemStore } from '@/stores/systemStore'
@@ -159,6 +161,9 @@ export function Dashboard() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Notification Bell */}
+            <NotificationWidget />
+
             {/* View Mode Toggle */}
             <div className="flex items-center border rounded-lg p-1">
               <Button
@@ -299,6 +304,9 @@ export function Dashboard() {
           {selectedTaskId && <TaskDetail taskId={selectedTaskId} />}
         </DialogContent>
       </Dialog>
+
+      {/* Toast Notifications */}
+      <ToastContainer />
     </div>
   )
 }

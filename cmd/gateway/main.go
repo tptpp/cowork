@@ -147,6 +147,11 @@ func main() {
 		api.DELETE("/agent/sessions/:id", h.DeleteAgentSession)
 		api.POST("/agent/sessions/:id/messages", h.SendAgentMessage)
 		api.GET("/agent/sessions/:id/messages", h.GetAgentMessages)
+
+		// Notification API
+		api.GET("/notifications", h.GetNotifications)
+		api.PUT("/notifications/read", h.MarkNotificationsRead)
+		api.PUT("/notifications/read-all", h.MarkAllNotificationsRead)
 	}
 
 	// 启动 HTTP 服务器

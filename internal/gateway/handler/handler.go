@@ -623,6 +623,22 @@ func (h *Handler) broadcastTaskUpdate(task *models.Task, event string) {
 	data, _ := json.Marshal(update)
 	h.hub.BroadcastToChannel("tasks", data)
 	h.hub.BroadcastToChannel("task:"+task.ID, data)
+
+	// 创建通知
+	switch event {
+	case "completed":
+		h.CreateNotification("task_complete", "任务完成",
+			"任务 "+task.ID+" 已成功完成",
+			models.JSON{"task_id": task.ID, "type": task.Type})
+	case "failed":
+		errMsg := ""
+		if task.Error != nil {
+			errMsg = *task.Error
+		}
+		h.CreateNotification("task_failed", "任务失败",
+			"任务 "+task.ID+" 执行失败: "+errMsg,
+			models.JSON{"task_id": task.ID, "error": errMsg})
+	}
 }
 
 // broadcastTaskLog 广播任务日志
@@ -711,4 +727,90 @@ func (h *Handler) SendAgentMessage(c *gin.Context) {
 // GetAgentMessages 获取会话消息列表
 func (h *Handler) GetAgentMessages(c *gin.Context) {
 	h.agentHandler.GetAgentMessages(c)
+}
+
+// Notification API
+
+// GetNotifications 获取通知列表
+func (h *Handler) GetNotifications(c *gin.Context) {
+	unreadOnly := c.Query("unread") == "true"
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+
+	notifications, err := h.notificationStore.List(unreadOnly, limit)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get notifications")
+		return
+	}
+
+	success(c, notifications)
+}
+
+// MarkNotificationsRead 标记通知已读
+func (h *Handler) MarkNotificationsRead(c *gin.Context) {
+	var req struct {
+		IDs []uint `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "No notification IDs provided")
+		return
+	}
+
+	if err := h.notificationStore.MarkRead(req.IDs); err != nil {
+		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to mark notifications as read")
+		return
+	}
+
+	success(c, gin.H{"success": true})
+}
+
+// MarkAllNotificationsRead 标记所有通知已读
+func (h *Handler) MarkAllNotificationsRead(c *gin.Context) {
+	if err := h.notificationStore.MarkAllRead(); err != nil {
+		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to mark all notifications as read")
+		return
+	}
+
+	success(c, gin.H{"success": true})
+}
+
+// CreateNotification 创建并发送通知
+func (h *Handler) CreateNotification(notifType, title, message string, data models.JSON) {
+	notification := &models.Notification{
+		Type:    notifType,
+		Title:   title,
+		Message: message,
+		Data:    data,
+		Read:    false,
+	}
+
+	if err := h.notificationStore.Create(notification); err != nil {
+		return
+	}
+
+	// 广播通知到前端
+	h.broadcastNotification(notification)
+}
+
+// broadcastNotification 广播通知
+func (h *Handler) broadcastNotification(notification *models.Notification) {
+	update := map[string]interface{}{
+		"type":        "notification",
+		"id":          notification.ID,
+		"notif_type":  notification.Type,
+		"title":       notification.Title,
+		"message":     notification.Message,
+		"data":        notification.Data,
+		"read":        notification.Read,
+		"created_at":  notification.CreatedAt.Unix(),
+	}
+
+	data, _ := json.Marshal(update)
+	h.hub.BroadcastToChannel("notifications", data)
+	// 也广播到所有客户端
+	h.hub.Broadcast(data)
 }
