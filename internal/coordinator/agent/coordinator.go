@@ -18,6 +18,13 @@ type ConversationCoordinator struct {
 	sessionStore   store.AgentSessionStore
 	toolExecStore  store.ToolExecutionStore
 	registry       *tools.Registry
+
+	// Phase 5: 任务拆解相关
+	decomposer     *TaskDecomposer
+	depManager     *DependencyManager
+	progressTracker *ProgressTracker
+	groupStore     store.TaskGroupStore
+	depStore       store.TaskDependencyStore
 }
 
 // CoordinatorConfig 协调器配置
@@ -39,6 +46,43 @@ func NewConversationCoordinator(
 		sessionStore:  sessionStore,
 		toolExecStore: toolExecStore,
 		registry:      registry,
+	}
+}
+
+// NewConversationCoordinatorWithDecomposer 创建带任务拆解功能的协调器
+func NewConversationCoordinatorWithDecomposer(
+	engine *FunctionCallingEngine,
+	scheduler *ToolScheduler,
+	sessionStore store.AgentSessionStore,
+	toolExecStore store.ToolExecutionStore,
+	registry *tools.Registry,
+	taskStore store.TaskStore,
+	groupStore store.TaskGroupStore,
+	depStore store.TaskDependencyStore,
+	config CoordinatorConfig,
+) *ConversationCoordinator {
+	// 创建依赖管理器
+	depManager := NewDependencyManager(depStore, taskStore)
+
+	// 创建进度追踪器
+	progressTracker := NewProgressTracker(groupStore, taskStore, depManager, ProgressTrackerConfig{})
+
+	// 创建任务拆解器
+	decomposer := NewTaskDecomposer(engine, taskStore, groupStore, depStore, DecomposerConfig{
+		MaxSubTasks: 10,
+	})
+
+	return &ConversationCoordinator{
+		engine:          engine,
+		scheduler:       scheduler,
+		sessionStore:    sessionStore,
+		toolExecStore:   toolExecStore,
+		registry:        registry,
+		decomposer:      decomposer,
+		depManager:      depManager,
+		progressTracker: progressTracker,
+		groupStore:      groupStore,
+		depStore:        depStore,
 	}
 }
 
@@ -371,4 +415,134 @@ func (c *ConversationCoordinator) ContinueWithToolResults(
 
 	// 继续处理
 	return c.processWithToolCalls(ctx, sessionID, cfg, session.SystemPrompt, chatMessages, toolNames, onToken)
+}
+
+// ========== Phase 5: 任务拆解能力 ==========
+
+// DecomposeTask 拆解复杂任务
+func (c *ConversationCoordinator) DecomposeTask(
+	ctx context.Context,
+	goal string,
+	conversationID string,
+	modelCfg ModelConfig,
+) (*models.TaskGroup, error) {
+	if c.decomposer == nil {
+		return nil, fmt.Errorf("task decomposer not initialized")
+	}
+
+	return c.decomposer.DecomposeTask(ctx, goal, conversationID, modelCfg)
+}
+
+// ShouldDecompose 判断是否需要拆解任务
+func (c *ConversationCoordinator) ShouldDecompose(goal string) bool {
+	if c.decomposer == nil {
+		return false
+	}
+	return c.decomposer.ShouldDecompose(goal)
+}
+
+// GetTaskProgress 获取任务组进度
+func (c *ConversationCoordinator) GetTaskProgress(groupID string) (*models.TaskProgressReport, error) {
+	if c.progressTracker == nil {
+		return nil, fmt.Errorf("progress tracker not initialized")
+	}
+	return c.progressTracker.GetProgressReport(groupID)
+}
+
+// GetReadyTasks 获取可以开始执行的任务
+func (c *ConversationCoordinator) GetReadyTasks(groupID string) ([]string, error) {
+	if c.depManager == nil {
+		return nil, fmt.Errorf("dependency manager not initialized")
+	}
+	return c.depManager.GetReadyTasks(groupID)
+}
+
+// GetTaskExecutionOrder 获取建议的任务执行顺序
+func (c *ConversationCoordinator) GetTaskExecutionOrder(groupID string) ([]string, error) {
+	if c.progressTracker == nil {
+		return nil, fmt.Errorf("progress tracker not initialized")
+	}
+	return c.progressTracker.GetTaskExecutionOrder(groupID)
+}
+
+// OnTaskCompleted 任务完成回调
+func (c *ConversationCoordinator) OnTaskCompleted(ctx context.Context, taskID string) error {
+	if c.depManager == nil || c.progressTracker == nil {
+		return nil
+	}
+
+	// 获取任务
+	task, err := c.scheduler.taskStore.Get(taskID)
+	if err != nil {
+		return err
+	}
+
+	// 更新依赖
+	if err := c.depManager.UpdateDependencies(taskID); err != nil {
+		log.Printf("Failed to update dependencies: %v", err)
+	}
+
+	// 更新进度
+	if task.GroupID != nil {
+		if err := c.progressTracker.UpdateProgress(ctx, *task.GroupID); err != nil {
+			log.Printf("Failed to update progress: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// GetTaskGroup 获取任务组详情
+func (c *ConversationCoordinator) GetTaskGroup(groupID string) (*models.TaskGroup, error) {
+	if c.groupStore == nil {
+		return nil, fmt.Errorf("group store not initialized")
+	}
+	return c.groupStore.Get(groupID)
+}
+
+// GetBlockedTasks 获取被阻塞的任务
+func (c *ConversationCoordinator) GetBlockedTasks(groupID string) (map[string][]string, error) {
+	if c.depManager == nil {
+		return nil, fmt.Errorf("dependency manager not initialized")
+	}
+	return c.depManager.GetBlockedTasks(groupID)
+}
+
+// GetExecutionLayers 获取执行层级（用于并行执行）
+func (c *ConversationCoordinator) GetExecutionLayers(groupID string) ([][]string, error) {
+	if c.depManager == nil {
+		return nil, fmt.Errorf("dependency manager not initialized")
+	}
+	return c.depManager.GetExecutionLayers(groupID)
+}
+
+// ProcessWithDecomposition 处理消息（支持自动拆解）
+func (c *ConversationCoordinator) ProcessWithDecomposition(
+	ctx context.Context,
+	sessionID string,
+	userMessage string,
+	cfg ModelConfig,
+	toolNames []string,
+	onToken func(string),
+) (*ProcessResult, *models.TaskGroup, error) {
+	// 检查是否需要拆解
+	if c.ShouldDecompose(userMessage) {
+		// 执行拆解
+		group, err := c.DecomposeTask(ctx, userMessage, sessionID, cfg)
+		if err != nil {
+			log.Printf("Failed to decompose task: %v", err)
+			// 拆解失败，继续正常处理
+		} else {
+			// 返回拆解结果
+			result := &ProcessResult{
+				Response:     fmt.Sprintf("已将任务拆解为 %d 个子任务。任务组 ID: %s", group.TotalTasks, group.ID),
+				FinishReason: "decomposed",
+			}
+			return result, group, nil
+		}
+	}
+
+	// 正常处理
+	result, err := c.ProcessMessage(ctx, sessionID, userMessage, cfg, toolNames, onToken)
+	return result, nil, err
 }

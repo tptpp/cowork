@@ -51,6 +51,8 @@ func autoMigrate(db *gorm.DB) error {
 		&models.UserLayout{},
 		&models.ToolDefinition{},
 		&models.ToolExecution{},
+		&models.TaskGroup{},
+		&models.TaskDependency{},
 	)
 }
 
@@ -709,4 +711,154 @@ func (s *toolExecutionStore) UpdateStatus(id uint, status string, result string,
 	}
 
 	return s.db.Model(&models.ToolExecution{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// ========== Phase 5: 任务组和依赖存储 ==========
+
+// TaskGroupStore 任务组存储接口
+type TaskGroupStore interface {
+	Create(group *models.TaskGroup) error
+	Get(id string) (*models.TaskGroup, error)
+	GetByConversation(conversationID string) ([]models.TaskGroup, error)
+	Update(group *models.TaskGroup) error
+	Delete(id string) error
+	List(opts ListOptions) ([]models.TaskGroup, int64, error)
+}
+
+// taskGroupStore 任务组存储实现
+type taskGroupStore struct {
+	db *gorm.DB
+}
+
+// NewTaskGroupStore 创建任务组存储
+func NewTaskGroupStore(db *gorm.DB) TaskGroupStore {
+	return &taskGroupStore{db: db}
+}
+
+// Create 创建任务组
+func (s *taskGroupStore) Create(group *models.TaskGroup) error {
+	return s.db.Create(group).Error
+}
+
+// Get 获取任务组
+func (s *taskGroupStore) Get(id string) (*models.TaskGroup, error) {
+	var group models.TaskGroup
+	err := s.db.Preload("Tasks").First(&group, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &group, nil
+}
+
+// GetByConversation 按会话 ID 获取任务组
+func (s *taskGroupStore) GetByConversation(conversationID string) ([]models.TaskGroup, error) {
+	var groups []models.TaskGroup
+	err := s.db.Where("conversation_id = ?", conversationID).Order("created_at DESC").Find(&groups).Error
+	return groups, err
+}
+
+// Update 更新任务组
+func (s *taskGroupStore) Update(group *models.TaskGroup) error {
+	return s.db.Save(group).Error
+}
+
+// Delete 删除任务组
+func (s *taskGroupStore) Delete(id string) error {
+	return s.db.Delete(&models.TaskGroup{}, "id = ?", id).Error
+}
+
+// List 获取任务组列表
+func (s *taskGroupStore) List(opts ListOptions) ([]models.TaskGroup, int64, error) {
+	var groups []models.TaskGroup
+	var total int64
+
+	query := s.db.Model(&models.TaskGroup{})
+
+	// 获取总数
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 排序
+	order := "created_at DESC"
+	if opts.Sort != "" {
+		order = opts.Sort
+	}
+	query = query.Order(order)
+
+	// 分页
+	if opts.Page > 0 && opts.PageSize > 0 {
+		offset := (opts.Page - 1) * opts.PageSize
+		query = query.Offset(offset).Limit(opts.PageSize)
+	}
+
+	err := query.Find(&groups).Error
+	return groups, total, err
+}
+
+// TaskDependencyStore 任务依赖存储接口
+type TaskDependencyStore interface {
+	Create(dep *models.TaskDependency) error
+	Get(id uint) (*models.TaskDependency, error)
+	GetByTaskID(taskID string) ([]models.TaskDependency, error)
+	GetDependents(taskID string) ([]models.TaskDependency, error) // 获取依赖此任务的其他任务
+	MarkSatisfied(id uint) error
+	Delete(id uint) error
+	GetGroupTasks(groupID string) ([]models.Task, error)
+}
+
+// taskDependencyStore 任务依赖存储实现
+type taskDependencyStore struct {
+	db *gorm.DB
+}
+
+// NewTaskDependencyStore 创建任务依赖存储
+func NewTaskDependencyStore(db *gorm.DB) TaskDependencyStore {
+	return &taskDependencyStore{db: db}
+}
+
+// Create 创建依赖关系
+func (s *taskDependencyStore) Create(dep *models.TaskDependency) error {
+	return s.db.Create(dep).Error
+}
+
+// Get 获取依赖关系
+func (s *taskDependencyStore) Get(id uint) (*models.TaskDependency, error) {
+	var dep models.TaskDependency
+	err := s.db.First(&dep, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &dep, nil
+}
+
+// GetByTaskID 获取任务的所有依赖
+func (s *taskDependencyStore) GetByTaskID(taskID string) ([]models.TaskDependency, error) {
+	var deps []models.TaskDependency
+	err := s.db.Where("task_id = ?", taskID).Find(&deps).Error
+	return deps, err
+}
+
+// GetDependents 获取依赖此任务的其他任务
+func (s *taskDependencyStore) GetDependents(taskID string) ([]models.TaskDependency, error) {
+	var deps []models.TaskDependency
+	err := s.db.Where("depends_on_task_id = ?", taskID).Find(&deps).Error
+	return deps, err
+}
+
+// MarkSatisfied 标记依赖已满足
+func (s *taskDependencyStore) MarkSatisfied(id uint) error {
+	return s.db.Model(&models.TaskDependency{}).Where("id = ?", id).Update("is_satisfied", true).Error
+}
+
+// Delete 删除依赖关系
+func (s *taskDependencyStore) Delete(id uint) error {
+	return s.db.Delete(&models.TaskDependency{}, id).Error
+}
+
+// GetGroupTasks 获取任务组中的所有任务
+func (s *taskDependencyStore) GetGroupTasks(groupID string) ([]models.Task, error) {
+	var tasks []models.Task
+	err := s.db.Where("group_id = ?", groupID).Order("created_at ASC").Find(&tasks).Error
+	return tasks, err
 }

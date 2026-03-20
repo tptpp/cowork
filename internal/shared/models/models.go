@@ -125,6 +125,11 @@ type Task struct {
 	ID          string     `gorm:"primaryKey;type:varchar(64)" json:"id"`
 	Type        string     `gorm:"type:varchar(50);index" json:"type"`
 	Description string     `gorm:"type:text" json:"description"`
+	Title       string     `gorm:"type:varchar(255)" json:"title"` // Phase 5: 任务标题
+
+	// 任务组 (Phase 5)
+	GroupID     *string    `gorm:"type:varchar(64);index" json:"group_id"`
+	Group       *TaskGroup `gorm:"foreignKey:GroupID" json:"group,omitempty"`
 
 	// 状态
 	Status      TaskStatus `gorm:"type:varchar(20);index" json:"status"`
@@ -471,3 +476,124 @@ const (
 	ToolExecutionStatusCompleted ToolExecutionStatus = "completed"
 	ToolExecutionStatusFailed    ToolExecutionStatus = "failed"
 )
+
+// ========== Phase 5: 任务拆解能力 ==========
+
+// TaskGroup 任务组 - 表示一次任务拆解的结果
+type TaskGroup struct {
+	ID              string     `gorm:"primaryKey;type:varchar(64)" json:"id"`
+	ParentTaskID    *string    `gorm:"type:varchar(64);index" json:"parent_task_id"`
+	ConversationID  string     `gorm:"type:varchar(64);index" json:"conversation_id"`
+
+	// 拆解信息
+	OriginalGoal    string     `gorm:"type:text" json:"original_goal"`
+	DecompositionReasoning string `gorm:"type:text" json:"decomposition_reasoning"`
+
+	// 状态
+	Status          TaskGroupStatus `gorm:"type:varchar(20);index" json:"status"`
+	Progress        int            `gorm:"default:0" json:"progress"` // 0-100
+
+	// 统计
+	TotalTasks      int `gorm:"default:0" json:"total_tasks"`
+	CompletedTasks  int `gorm:"default:0" json:"completed_tasks"`
+	FailedTasks     int `gorm:"default:0" json:"failed_tasks"`
+
+	// 时间
+	CreatedAt   time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+
+	// 关联
+	Tasks []Task `gorm:"foreignKey:GroupID" json:"tasks,omitempty"`
+}
+
+// TableName 指定表名
+func (TaskGroup) TableName() string {
+	return "task_groups"
+}
+
+// TaskGroupStatus 任务组状态
+type TaskGroupStatus string
+
+const (
+	TaskGroupStatusPending   TaskGroupStatus = "pending"
+	TaskGroupStatusRunning   TaskGroupStatus = "running"
+	TaskGroupStatusCompleted TaskGroupStatus = "completed"
+	TaskGroupStatusFailed    TaskGroupStatus = "failed"
+	TaskGroupStatusCancelled TaskGroupStatus = "cancelled"
+)
+
+// TaskDependency 任务依赖关系
+type TaskDependency struct {
+	ID             uint   `gorm:"primaryKey;autoIncrement" json:"id"`
+	TaskID         string `gorm:"type:varchar(64);index;not null" json:"task_id"`
+	DependsOnTaskID string `gorm:"type:varchar(64);index;not null" json:"depends_on_task_id"`
+
+	// 依赖类型
+	Type DependencyType `gorm:"type:varchar(20);default:'finish'" json:"type"`
+
+	// 状态
+	IsSatisfied bool `gorm:"default:false" json:"is_satisfied"`
+
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+}
+
+// TableName 指定表名
+func (TaskDependency) TableName() string {
+	return "task_dependencies"
+}
+
+// DependencyType 依赖类型
+type DependencyType string
+
+const (
+	DependencyTypeFinish   DependencyType = "finish"   // 任务完成后才能开始
+	DependencyTypeSuccess  DependencyType = "success"  // 任务成功后才能开始
+	DependencyTypeFailure  DependencyType = "failure"  // 任务失败后才能开始
+)
+
+// DecomposedTask 拆解后的任务（LLM 返回的结构）
+type DecomposedTask struct {
+	ID          string                 `json:"id"`
+	Title       string                 `json:"title"`
+	Description string                 `json:"description"`
+	Type        string                 `json:"type"`
+	Priority    Priority               `json:"priority"`
+	Input       map[string]interface{} `json:"input,omitempty"`
+	DependsOn   []string               `json:"depends_on,omitempty"` // 依赖的任务 ID
+	RequiredTags []string              `json:"required_tags,omitempty"`
+	EstimatedSteps int                 `json:"estimated_steps,omitempty"`
+}
+
+// DecompositionResult 任务拆解结果
+type DecompositionResult struct {
+	Success      bool             `json:"success"`
+	Reasoning    string           `json:"reasoning"`
+	Tasks        []DecomposedTask `json:"tasks"`
+	ExecutionOrder []string       `json:"execution_order"` // 建议的执行顺序
+	Error        string           `json:"error,omitempty"`
+}
+
+// TaskProgressReport 任务进度报告
+type TaskProgressReport struct {
+	GroupID         string                `json:"group_id"`
+	TotalTasks      int                   `json:"total_tasks"`
+	CompletedTasks  int                   `json:"completed_tasks"`
+	RunningTasks    int                   `json:"running_tasks"`
+	PendingTasks    int                   `json:"pending_tasks"`
+	FailedTasks     int                   `json:"failed_tasks"`
+	Progress        int                   `json:"progress"`
+	Status          TaskGroupStatus       `json:"status"`
+	TaskStatuses    []TaskStatusInfo      `json:"task_statuses"`
+	EstimatedTimeRemaining *int           `json:"estimated_time_remaining,omitempty"` // 秒
+}
+
+// TaskStatusInfo 任务状态信息
+type TaskStatusInfo struct {
+	TaskID       string     `json:"task_id"`
+	Title        string     `json:"title"`
+	Status       TaskStatus `json:"status"`
+	Progress     int        `json:"progress"`
+	Dependencies []string   `json:"dependencies,omitempty"`
+	CanBeStarted bool       `json:"can_be_started"`
+}
