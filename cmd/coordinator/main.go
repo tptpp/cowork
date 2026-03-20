@@ -15,6 +15,7 @@ import (
 	"github.com/tp/cowork/internal/coordinator/middleware"
 	"github.com/tp/cowork/internal/coordinator/scheduler"
 	"github.com/tp/cowork/internal/coordinator/store"
+	"github.com/tp/cowork/internal/coordinator/tools"
 	"github.com/tp/cowork/internal/coordinator/ws"
 )
 
@@ -55,6 +56,13 @@ func main() {
 	taskScheduler.Start()
 	defer taskScheduler.Stop()
 
+	// 初始化工具注册中心
+	toolRegistry := tools.NewRegistry(store.NewToolDefinitionStore(s.DB()))
+	if err := toolRegistry.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize tool registry: %v", err)
+	}
+	log.Printf("Tool registry initialized with %d builtin tools", len(toolRegistry.GetBuiltinTools()))
+
 	// 初始化处理器
 	h := handler.NewHandler(
 		store.NewTaskStore(s.DB()),
@@ -65,6 +73,7 @@ func main() {
 		store.NewAgentSessionStore(s.DB()),
 		hub,
 		taskScheduler,
+		toolRegistry,
 	)
 
 	// 创建 Gin 路由
@@ -147,6 +156,15 @@ func main() {
 		api.DELETE("/agent/sessions/:id", h.DeleteAgentSession)
 		api.POST("/agent/sessions/:id/messages", h.SendAgentMessage)
 		api.GET("/agent/sessions/:id/messages", h.GetAgentMessages)
+
+		// Tool API
+		api.GET("/tools", h.GetTools)
+		api.GET("/tools/:name", h.GetTool)
+		api.POST("/tools", h.CreateTool)
+		api.PUT("/tools/:name", h.UpdateTool)
+		api.DELETE("/tools/:name", h.DeleteTool)
+		api.POST("/tools/:name/enable", h.EnableTool)
+		api.POST("/tools/:name/disable", h.DisableTool)
 
 		// Notification API
 		api.GET("/notifications", h.GetNotifications)

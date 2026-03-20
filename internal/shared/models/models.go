@@ -315,3 +315,106 @@ type UserLayout struct {
 func (UserLayout) TableName() string {
 	return "user_layouts"
 }
+
+// ToolCategory 工具类别
+type ToolCategory string
+
+const (
+	ToolCategorySystem ToolCategory = "system" // 系统工具 (execute_shell, read_file, etc.)
+	ToolCategoryFile   ToolCategory = "file"   // 文件工具
+	ToolCategoryWeb    ToolCategory = "web"    // Web 工具
+	ToolCategoryTask   ToolCategory = "task"   // 任务工具
+	ToolCategoryCustom ToolCategory = "custom" // 自定义工具
+)
+
+// ToolExecuteMode 工具执行模式
+type ToolExecuteMode string
+
+const (
+	ToolExecuteModeLocal  ToolExecuteMode = "local"  // 在 Coordinator 本地执行
+	ToolExecuteModeRemote ToolExecuteMode = "remote" // 在 Worker 远程执行
+)
+
+// ToolPermission 工具权限级别
+type ToolPermission string
+
+const (
+	ToolPermissionRead    ToolPermission = "read"    // 只读操作
+	ToolPermissionWrite   ToolPermission = "write"   // 写操作
+	ToolPermissionExecute ToolPermission = "execute" // 执行操作
+	ToolPermissionAdmin   ToolPermission = "admin"   // 管理操作
+)
+
+// ToolDefinition 工具定义 (OpenAI Compatible)
+type ToolDefinition struct {
+	ID          string `gorm:"primaryKey;type:varchar(64)" json:"id"`
+	Name        string `gorm:"type:varchar(100);uniqueIndex;not null" json:"name"`
+	Description string `gorm:"type:text" json:"description"`
+	Parameters  JSON   `gorm:"type:text" json:"parameters"` // JSON Schema
+
+	// 分类与权限
+	Category    ToolCategory    `gorm:"type:varchar(50);index" json:"category"`
+	ExecuteMode ToolExecuteMode `gorm:"type:varchar(20);default:'remote'" json:"execute_mode"`
+	Permission  ToolPermission  `gorm:"type:varchar(20);default:'read'" json:"permission"`
+
+	// 实现信息
+	Handler string `gorm:"type:varchar(255)" json:"handler"` // 处理函数名或 API endpoint
+
+	IsEnabled bool `gorm:"default:true" json:"is_enabled"`
+	IsBuiltin bool `gorm:"default:false" json:"is_builtin"`
+
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+// TableName 指定表名
+func (ToolDefinition) TableName() string {
+	return "tool_definitions"
+}
+
+// ToOpenAITool 转换为 OpenAI 工具格式
+func (t *ToolDefinition) ToOpenAITool() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "function",
+		"function": map[string]interface{}{
+			"name":        t.Name,
+			"description": t.Description,
+			"parameters":  t.Parameters,
+		},
+	}
+}
+
+// ToolExecution 工具执行记录
+type ToolExecution struct {
+	ID             uint   `gorm:"primaryKey;autoIncrement" json:"id"`
+	ConversationID string `gorm:"type:varchar(64);index" json:"conversation_id"`
+	MessageID      uint   `gorm:"index" json:"message_id"`
+	TaskID         *string `gorm:"type:varchar(64);index" json:"task_id"`
+
+	ToolName   string `gorm:"type:varchar(100);index" json:"tool_name"`
+	ToolCallID string `gorm:"type:varchar(64)" json:"tool_call_id"`
+	Arguments  JSON   `gorm:"type:text" json:"arguments"`
+
+	Status  string `gorm:"type:varchar(20);index" json:"status"` // pending, running, completed, failed
+	Result  string `gorm:"type:text" json:"result"`
+	IsError bool   `gorm:"default:false" json:"is_error"`
+
+	StartedAt   *time.Time `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	CreatedAt   time.Time  `gorm:"autoCreateTime" json:"created_at"`
+}
+
+// TableName 指定表名
+func (ToolExecution) TableName() string {
+	return "tool_executions"
+}
+
+// ToolExecutionStatus 工具执行状态
+type ToolExecutionStatus string
+
+const (
+	ToolExecutionStatusPending   ToolExecutionStatus = "pending"
+	ToolExecutionStatusRunning   ToolExecutionStatus = "running"
+	ToolExecutionStatusCompleted ToolExecutionStatus = "completed"
+	ToolExecutionStatusFailed    ToolExecutionStatus = "failed"
+)

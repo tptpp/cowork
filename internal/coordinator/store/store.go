@@ -48,6 +48,8 @@ func autoMigrate(db *gorm.DB) error {
 		&models.AgentMessage{},
 		&models.Notification{},
 		&models.UserLayout{},
+		&models.ToolDefinition{},
+		&models.ToolExecution{},
 	)
 }
 
@@ -492,4 +494,123 @@ func (s *agentSessionStore) GetMessages(sessionID string, limit int) ([]models.A
 	}
 	err := query.Find(&messages).Error
 	return messages, err
+}
+
+// ToolDefinitionStore 工具定义存储接口
+type ToolDefinitionStore interface {
+	Create(tool *models.ToolDefinition) error
+	Get(id string) (*models.ToolDefinition, error)
+	GetByName(name string) (*models.ToolDefinition, error)
+	List(opts ToolListOptions) ([]models.ToolDefinition, int64, error)
+	Update(tool *models.ToolDefinition) error
+	Delete(id string) error
+	GetByCategory(category models.ToolCategory) ([]models.ToolDefinition, error)
+	GetEnabled() ([]models.ToolDefinition, error)
+	GetBuiltin() ([]models.ToolDefinition, error)
+}
+
+// ToolListOptions 工具列表查询选项
+type ToolListOptions struct {
+	Page     int
+	PageSize int
+	Category string
+	Enabled  *bool
+}
+
+// toolDefinitionStore 工具定义存储实现
+type toolDefinitionStore struct {
+	db *gorm.DB
+}
+
+// NewToolDefinitionStore 创建工具定义存储
+func NewToolDefinitionStore(db *gorm.DB) ToolDefinitionStore {
+	return &toolDefinitionStore{db: db}
+}
+
+// Create 创建工具定义
+func (s *toolDefinitionStore) Create(tool *models.ToolDefinition) error {
+	return s.db.Create(tool).Error
+}
+
+// Get 获取工具定义
+func (s *toolDefinitionStore) Get(id string) (*models.ToolDefinition, error) {
+	var tool models.ToolDefinition
+	err := s.db.First(&tool, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &tool, nil
+}
+
+// GetByName 按名称获取工具定义
+func (s *toolDefinitionStore) GetByName(name string) (*models.ToolDefinition, error) {
+	var tool models.ToolDefinition
+	err := s.db.First(&tool, "name = ?", name).Error
+	if err != nil {
+		return nil, err
+	}
+	return &tool, nil
+}
+
+// List 获取工具定义列表
+func (s *toolDefinitionStore) List(opts ToolListOptions) ([]models.ToolDefinition, int64, error) {
+	var tools []models.ToolDefinition
+	var total int64
+
+	query := s.db.Model(&models.ToolDefinition{})
+
+	if opts.Category != "" {
+		query = query.Where("category = ?", opts.Category)
+	}
+	if opts.Enabled != nil {
+		query = query.Where("is_enabled = ?", *opts.Enabled)
+	}
+
+	// 获取总数
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 排序
+	query = query.Order("name ASC")
+
+	// 分页
+	if opts.Page > 0 && opts.PageSize > 0 {
+		offset := (opts.Page - 1) * opts.PageSize
+		query = query.Offset(offset).Limit(opts.PageSize)
+	}
+
+	err := query.Find(&tools).Error
+	return tools, total, err
+}
+
+// Update 更新工具定义
+func (s *toolDefinitionStore) Update(tool *models.ToolDefinition) error {
+	return s.db.Save(tool).Error
+}
+
+// Delete 删除工具定义
+func (s *toolDefinitionStore) Delete(id string) error {
+	return s.db.Delete(&models.ToolDefinition{}, "id = ?", id).Error
+}
+
+// GetByCategory 按类别获取工具定义
+func (s *toolDefinitionStore) GetByCategory(category models.ToolCategory) ([]models.ToolDefinition, error) {
+	var tools []models.ToolDefinition
+	err := s.db.Where("category = ? AND is_enabled = ?", category, true).Find(&tools).Error
+	return tools, err
+}
+
+// GetEnabled 获取所有启用的工具定义
+func (s *toolDefinitionStore) GetEnabled() ([]models.ToolDefinition, error) {
+	var tools []models.ToolDefinition
+	err := s.db.Where("is_enabled = ?", true).Order("name ASC").Find(&tools).Error
+	return tools, err
+}
+
+// GetBuiltin 获取所有内置工具定义
+func (s *toolDefinitionStore) GetBuiltin() ([]models.ToolDefinition, error) {
+	var tools []models.ToolDefinition
+	err := s.db.Where("is_builtin = ?", true).Order("name ASC").Find(&tools).Error
+	return tools, err
 }

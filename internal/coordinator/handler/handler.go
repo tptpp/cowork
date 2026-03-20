@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tp/cowork/internal/coordinator/scheduler"
 	"github.com/tp/cowork/internal/coordinator/store"
+	"github.com/tp/cowork/internal/coordinator/tools"
 	"github.com/tp/cowork/internal/coordinator/ws"
 	"github.com/tp/cowork/internal/shared/errors"
 	"github.com/tp/cowork/internal/shared/models"
@@ -24,6 +25,7 @@ type Handler struct {
 	userLayoutStore  store.UserLayoutStore
 	agentStore       store.AgentSessionStore
 	agentHandler     *AgentHandler
+	toolHandler      *ToolHandler
 	hub              *ws.Hub
 	scheduler        *scheduler.Scheduler
 	startTime        time.Time
@@ -39,6 +41,7 @@ func NewHandler(
 	agentStore store.AgentSessionStore,
 	hub *ws.Hub,
 	sched *scheduler.Scheduler,
+	toolRegistry *tools.Registry,
 ) *Handler {
 	return &Handler{
 		taskStore:        taskStore,
@@ -48,6 +51,7 @@ func NewHandler(
 		userLayoutStore:  userLayoutStore,
 		agentStore:       agentStore,
 		agentHandler:     NewAgentHandler(agentStore),
+		toolHandler:      NewToolHandler(toolRegistry),
 		hub:              hub,
 		scheduler:        sched,
 		startTime:        time.Now(),
@@ -825,4 +829,41 @@ func (h *Handler) broadcastNotification(notification *models.Notification) {
 	h.hub.BroadcastToChannel("notifications", data)
 	// 也广播到所有客户端
 	h.hub.Broadcast(data)
+}
+
+// Tool API - 委托给 ToolHandler
+
+// GetTools 获取工具列表
+func (h *Handler) GetTools(c *gin.Context) {
+	h.toolHandler.GetTools(c)
+}
+
+// GetTool 获取工具详情
+func (h *Handler) GetTool(c *gin.Context) {
+	h.toolHandler.GetTool(c)
+}
+
+// CreateTool 创建自定义工具
+func (h *Handler) CreateTool(c *gin.Context) {
+	h.toolHandler.CreateTool(c)
+}
+
+// UpdateTool 更新工具
+func (h *Handler) UpdateTool(c *gin.Context) {
+	h.toolHandler.UpdateTool(c)
+}
+
+// DeleteTool 删除工具
+func (h *Handler) DeleteTool(c *gin.Context) {
+	h.toolHandler.DeleteTool(c)
+}
+
+// EnableTool 启用工具
+func (h *Handler) EnableTool(c *gin.Context) {
+	h.toolHandler.EnableTool(c)
+}
+
+// DisableTool 禁用工具
+func (h *Handler) DisableTool(c *gin.Context) {
+	h.toolHandler.DisableTool(c)
 }
