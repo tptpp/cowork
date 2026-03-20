@@ -121,6 +121,55 @@ export interface WidgetDefinition {
   minSize?: { w: number; h: number }
 }
 
+// Tool Call types (OpenAI Compatible)
+export interface ToolCall {
+  id: string
+  type: string // "function"
+  function: {
+    name: string
+    arguments: string // JSON string
+  }
+}
+
+export interface ToolResult {
+  tool_call_id: string
+  output: string
+  is_error: boolean
+}
+
+export type ToolExecutionStatus = 'pending' | 'running' | 'completed' | 'failed'
+
+export interface ToolExecution {
+  id: number
+  conversation_id: string
+  message_id: number
+  task_id: string | null
+  tool_name: string
+  tool_call_id: string
+  arguments: Record<string, unknown>
+  status: ToolExecutionStatus
+  result: string
+  is_error: boolean
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
+export interface ToolDefinition {
+  id: string
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+  category: string
+  execute_mode: 'local' | 'remote'
+  permission: 'read' | 'write' | 'execute' | 'admin'
+  handler: string
+  is_enabled: boolean
+  is_builtin: boolean
+  created_at: string
+  updated_at: string
+}
+
 // Agent types
 export interface AgentSession {
   id: string
@@ -136,8 +185,10 @@ export interface AgentSession {
 export interface AgentMessage {
   id: number
   session_id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
+  tool_calls?: ToolCall[]
+  tool_call_id?: string
   tokens: number
   created_at: string
 }
