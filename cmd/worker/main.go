@@ -23,24 +23,24 @@ import (
 
 // WorkerConfig Worker 配置
 type WorkerConfig struct {
-	Name          string
-	Tags          []string
-	Model         string
-	GatewayURL    string
-	MaxConcurrent int
-	WorkDir       string
+	Name            string
+	Tags            []string
+	Model           string
+	CoordinatorURL  string
+	MaxConcurrent   int
+	WorkDir         string
 }
 
-// GatewayClient Gateway 客户端
-type GatewayClient struct {
+// CoordinatorClient Coordinator 客户端
+type CoordinatorClient struct {
 	baseURL    string
 	httpClient *http.Client
 	workerID   string
 }
 
-// NewGatewayClient 创建 Gateway 客户端
-func NewGatewayClient(baseURL string) *GatewayClient {
-	return &GatewayClient{
+// NewCoordinatorClient 创建 Coordinator 客户端
+func NewCoordinatorClient(baseURL string) *CoordinatorClient {
+	return &CoordinatorClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
@@ -86,7 +86,7 @@ type TaskLogRequest struct {
 }
 
 // Register 注册 Worker
-func (c *GatewayClient) Register(name string, tags []string, model string, maxConcurrent int) (*RegisterResponse, error) {
+func (c *CoordinatorClient) Register(name string, tags []string, model string, maxConcurrent int) (*RegisterResponse, error) {
 	payload := map[string]interface{}{
 		"name":           name,
 		"tags":           tags,
@@ -128,7 +128,7 @@ func (c *GatewayClient) Register(name string, tags []string, model string, maxCo
 }
 
 // SendHeartbeat 发送心跳
-func (c *GatewayClient) SendHeartbeat(status string, currentTasks []string, progress map[string]int) (*HeartbeatResponse, error) {
+func (c *CoordinatorClient) SendHeartbeat(status string, currentTasks []string, progress map[string]int) (*HeartbeatResponse, error) {
 	payload := map[string]interface{}{
 		"status":        status,
 		"current_tasks": currentTasks,
@@ -168,7 +168,7 @@ func (c *GatewayClient) SendHeartbeat(status string, currentTasks []string, prog
 }
 
 // FetchTask 获取任务详情
-func (c *GatewayClient) FetchTask(taskID string) (*models.Task, error) {
+func (c *CoordinatorClient) FetchTask(taskID string) (*models.Task, error) {
 	url := fmt.Sprintf("%s/api/tasks/%s", c.baseURL, taskID)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
@@ -189,7 +189,7 @@ func (c *GatewayClient) FetchTask(taskID string) (*models.Task, error) {
 }
 
 // UpdateTask 更新任务状态
-func (c *GatewayClient) UpdateTask(taskID string, update TaskUpdateRequest) error {
+func (c *CoordinatorClient) UpdateTask(taskID string, update TaskUpdateRequest) error {
 	body, err := json.Marshal(update)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (c *GatewayClient) UpdateTask(taskID string, update TaskUpdateRequest) erro
 }
 
 // SendTaskLog 发送任务日志
-func (c *GatewayClient) SendTaskLog(taskID string, level, message string) error {
+func (c *CoordinatorClient) SendTaskLog(taskID string, level, message string) error {
 	payload := TaskLogRequest{
 		Level:   level,
 		Message: message,
@@ -236,7 +236,7 @@ func (c *GatewayClient) SendTaskLog(taskID string, level, message string) error 
 // Worker 工作节点
 type Worker struct {
 	config   *WorkerConfig
-	client   *GatewayClient
+	client   *CoordinatorClient
 	executor *executor.Executor
 	id       string
 	status   string
@@ -270,7 +270,7 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 
 	return &Worker{
 		config:   cfg,
-		client:   NewGatewayClient(cfg.GatewayURL),
+		client:   NewCoordinatorClient(cfg.CoordinatorURL),
 		executor: executor.New(execConfig),
 		status:   "idle",
 		tasks:    make(map[string]*RunningTask),
@@ -280,7 +280,7 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 
 // Start 启动 Worker
 func (w *Worker) Start() error {
-	// 注册到 Gateway
+	// 注册到 Coordinator
 	resp, err := w.client.Register(w.config.Name, w.config.Tags, w.config.Model, w.config.MaxConcurrent)
 	if err != nil {
 		return fmt.Errorf("failed to register: %w", err)
@@ -475,7 +475,7 @@ func (c *taskCallback) OnLog(taskID string, level, message string) {
 	}
 	c.worker.tasksMu.Unlock()
 
-	// 发送到 Gateway
+	// 发送到 Coordinator
 	go c.worker.client.SendTaskLog(taskID, level, message)
 }
 
@@ -503,7 +503,7 @@ func main() {
 	name := flag.String("name", "", "Worker name (required)")
 	tagsStr := flag.String("tags", "", "Worker tags (comma-separated)")
 	model := flag.String("model", "", "Default model")
-	gateway := flag.String("gateway", "http://localhost:8080", "Gateway URL")
+	coordinator := flag.String("coordinator", "http://localhost:8080", "Coordinator URL")
 	maxConcurrent := flag.Int("max-concurrent", 1, "Maximum concurrent tasks")
 	workDir := flag.String("work-dir", "", "Base work directory")
 	flag.Parse()
@@ -524,12 +524,12 @@ func main() {
 
 	// 创建 Worker
 	cfg := &WorkerConfig{
-		Name:          *name,
-		Tags:          tags,
-		Model:         *model,
-		GatewayURL:    *gateway,
-		MaxConcurrent: *maxConcurrent,
-		WorkDir:       *workDir,
+		Name:           *name,
+		Tags:           tags,
+		Model:          *model,
+		CoordinatorURL: *coordinator,
+		MaxConcurrent:  *maxConcurrent,
+		WorkDir:        *workDir,
 	}
 
 	worker := NewWorker(cfg)

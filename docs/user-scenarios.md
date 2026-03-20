@@ -707,7 +707,7 @@ Agent Chat 提供 AI 对话能力，是用户获取 AI 辅助的主要入口。
 
 ```bash
 # 1. 启动 Coordinator
-go run ./cmd/gateway
+go run ./cmd/coordinator
 
 # 2. 启动 Worker（另一个终端）
 go run ./cmd/worker --name=worker-1 --tags=dev,coding --model=gpt-4

@@ -16,8 +16,8 @@
 # 克隆项目
 cd ~/projects/cowork
 
-# 启动 Gateway
-go run ./cmd/gateway
+# 启动 Coordinator
+go run ./cmd/coordinator
 
 # 启动 Worker（另一个终端）
 go run ./cmd/worker --name=worker-1 --tags=dev --model=gpt-4
@@ -70,10 +70,10 @@ log:
 
 ## 2. Docker 部署
 
-### 2.1 Dockerfile - Gateway
+### 2.1 Dockerfile - Coordinator
 
 ```dockerfile
-# docker/Dockerfile.gateway
+# docker/Dockerfile.coordinator
 FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
@@ -81,19 +81,19 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -o gateway ./cmd/gateway
+RUN CGO_ENABLED=1 GOOS=linux go build -o coordinator ./cmd/coordinator
 
 FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates sqlite
 WORKDIR /app
 
-COPY --from=builder /app/gateway .
+COPY --from=builder /app/coordinator .
 COPY --from=builder /app/web/dist ./web/dist
 
 EXPOSE 8080
 
-CMD ["./gateway"]
+CMD ["./coordinator"]
 ```
 
 ### 2.2 Dockerfile - Worker
@@ -129,17 +129,17 @@ CMD ["./worker"]
 version: '3.8'
 
 services:
-  gateway:
+  coordinator:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.gateway
+      dockerfile: docker/Dockerfile.coordinator
     ports:
       - "8080:8080"
     volumes:
       - cowork-data:/app/data
       - cowork-workdir:/tmp/cowork
     environment:
-      - GATEWAY_URL=http://gateway:8080
+      - COORDINATOR_URL=http://coordinator:8080
     restart: unless-stopped
 
   worker-dev:
@@ -147,9 +147,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.worker
     depends_on:
-      - gateway
+      - coordinator
     environment:
-      - GATEWAY_URL=http://gateway:8080
+      - COORDINATOR_URL=http://coordinator:8080
       - WORKER_NAME=worker-dev
       - WORKER_TAGS=dev,coding
       - WORKER_MODEL=gpt-4
@@ -162,9 +162,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.worker
     depends_on:
-      - gateway
+      - coordinator
     environment:
-      - GATEWAY_URL=http://gateway:8080
+      - COORDINATOR_URL=http://coordinator:8080
       - WORKER_NAME=worker-test
       - WORKER_TAGS=test,qa
       - WORKER_MODEL=claude-3
@@ -187,7 +187,7 @@ docker-compose build
 docker-compose up -d
 
 # 查看日志
-docker-compose logs -f gateway
+docker-compose logs -f coordinator
 
 # 停止服务
 docker-compose down
@@ -203,9 +203,9 @@ docker-compose down -v
 ### 3.1 Systemd 服务
 
 ```ini
-# /etc/systemd/system/cowork-gateway.service
+# /etc/systemd/system/cowork-coordinator.service
 [Unit]
-Description=Cowork Gateway
+Description=Cowork Coordinator
 After=network.target
 
 [Service]
@@ -213,7 +213,7 @@ Type=simple
 User=cowork
 Group=cowork
 WorkingDirectory=/opt/cowork
-ExecStart=/opt/cowork/gateway
+ExecStart=/opt/cowork/coordinator
 Restart=on-failure
 RestartSec=5s
 
@@ -232,7 +232,7 @@ WantedBy=multi-user.target
 # /etc/systemd/system/cowork-worker.service
 [Unit]
 Description=Cowork Worker
-After=network.target cowork-gateway.service
+After=network.target cowork-coordinator.service
 
 [Service]
 Type=simple
@@ -252,9 +252,9 @@ WantedBy=multi-user.target
 **启用服务**：
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable cowork-gateway
+sudo systemctl enable cowork-coordinator
 sudo systemctl enable cowork-worker
-sudo systemctl start cowork-gateway
+sudo systemctl start cowork-coordinator
 sudo systemctl start cowork-worker
 ```
 
@@ -326,7 +326,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  gateway:
+  coordinator:
     # ...
     environment:
       - DB_TYPE=postgres
@@ -366,7 +366,7 @@ volumes:
 ```yaml
 # prometheus.yml
 scrape_configs:
-  - job_name: 'cowork-gateway'
+  - job_name: 'cowork-coordinator'
     static_configs:
       - targets: ['localhost:8080']
     metrics_path: '/metrics'
@@ -379,11 +379,11 @@ scrape_configs:
 #!/bin/bash
 # scripts/healthcheck.sh
 
-GATEWAY_URL="http://localhost:8080"
+COORDINATOR_URL="http://localhost:8080"
 
-# 检查 Gateway
-if ! curl -sf "$GATEWAY_URL/api/system/stats" > /dev/null; then
-    echo "Gateway is not responding"
+# 检查 Coordinator
+if ! curl -sf "$COORDINATOR_URL/api/system/stats" > /dev/null; then
+    echo "Coordinator is not responding"
     exit 1
 fi
 
@@ -439,7 +439,7 @@ echo "Backup completed: cowork_$DATE.db"
 ### 6.1 防火墙配置
 
 ```bash
-# 只允许本地访问 Gateway
+# 只允许本地访问 Coordinator
 sudo ufw allow 80/tcp   # Nginx
 sudo ufw allow 443/tcp  # Nginx HTTPS
 sudo ufw enable
@@ -481,11 +481,11 @@ sudo chmod 600 /opt/cowork/.env
 
 ```bash
 # 检查服务状态
-sudo systemctl status cowork-gateway
+sudo systemctl status cowork-coordinator
 sudo systemctl status cowork-worker
 
 # 查看日志
-journalctl -u cowork-gateway -f
+journalctl -u cowork-coordinator -f
 journalctl -u cowork-worker -f
 
 # 检查端口占用

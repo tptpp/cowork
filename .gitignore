@@ -1,8 +1,6 @@
 # Binaries
-/gateway
-/worker
-/cowork-gateway
 /coordinator
+/worker
 /coordinator-test
 /test-build
 /bin/

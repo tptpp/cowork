@@ -320,9 +320,9 @@ Worker 集群：
 ### 4.2 模块化设计
 
 ```
-Gateway 模块化：
+Coordinator 模块化：
 
-cmd/gateway/main.go
+cmd/coordinator/main.go
 ├── 内置模块（默认启用）
 │   ├── TaskModule      // 任务管理
 │   ├── AgentModule     // Agent 对话
@@ -492,9 +492,9 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 
 // Worker 优雅关闭
 func (w *Worker) Shutdown(ctx context.Context) error {
-    // 1. 通知 Gateway 即将下线
-    w.gatewayClient.NotifyShutdown()
-    
+    // 1. 通知 Coordinator 即将下线
+    w.coordinatorClient.NotifyShutdown()
+
     // 2. 完成当前任务
     w.waitForCurrentTasks(ctx)
     

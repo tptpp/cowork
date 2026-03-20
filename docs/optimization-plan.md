@@ -179,9 +179,9 @@ type LogConfig struct {
 当前项目缺少测试文件，建议优先覆盖核心模块。
 
 **优先测试模块**：
-1. `internal/gateway/scheduler/scheduler.go` - 调度逻辑
+1. `internal/coordinator/scheduler/scheduler.go` - 调度逻辑
 2. `internal/worker/executor/executor.go` - 执行器逻辑
-3. `internal/gateway/store/store.go` - 数据访问层
+3. `internal/coordinator/store/store.go` - 数据访问层
 
 **示例测试** (`scheduler_test.go`):
 ```go

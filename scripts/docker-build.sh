@@ -42,7 +42,7 @@ start_services() {
     log_info "Services started"
     
     echo ""
-    log_info "Gateway: http://localhost:8080"
+    log_info "Coordinator: http://localhost:8080"
     log_info "Health check: http://localhost:8080/health"
     log_info "API docs: http://localhost:8080/api/system/stats"
 }
@@ -87,7 +87,7 @@ usage() {
     echo "Examples:"
     echo "  $0 build"
     echo "  $0 start"
-    echo "  $0 logs gateway"
+    echo "  $0 logs coordinator"
 }
 
 # 状态
