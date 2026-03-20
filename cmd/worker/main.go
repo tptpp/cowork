@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,8 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tp/cowork/internal/worker/executor"
+	"github.com/rs/zerolog/log"
+	"github.com/tp/cowork/internal/shared/logger"
 	"github.com/tp/cowork/internal/shared/models"
+	"github.com/tp/cowork/internal/worker/executor"
 )
 
 // WorkerConfig Worker 配置
@@ -105,8 +106,8 @@ func (c *GatewayClient) Register(name string, tags []string, model string, maxCo
 	defer resp.Body.Close()
 
 	var result struct {
-		Success bool               `json:"success"`
-		Data    RegisterResponse   `json:"data"`
+		Success bool             `json:"success"`
+		Data    RegisterResponse `json:"data"`
 		Error   *struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
@@ -234,14 +235,14 @@ func (c *GatewayClient) SendTaskLog(taskID string, level, message string) error 
 
 // Worker 工作节点
 type Worker struct {
-	config     *WorkerConfig
-	client     *GatewayClient
-	executor   *executor.Executor
-	id         string
-	status     string
-	tasks      map[string]*RunningTask
-	tasksMu    sync.RWMutex
-	stopCh     chan struct{}
+	config   *WorkerConfig
+	client   *GatewayClient
+	executor *executor.Executor
+	id       string
+	status   string
+	tasks    map[string]*RunningTask
+	tasksMu  sync.RWMutex
+	stopCh   chan struct{}
 }
 
 // RunningTask 运行中的任务
@@ -287,7 +288,7 @@ func (w *Worker) Start() error {
 
 	w.id = resp.ID
 	w.client.workerID = resp.ID
-	log.Printf("Worker registered: id=%s, name=%s", w.id, w.config.Name)
+	log.Info().Str("id", w.id).Str("name", w.config.Name).Msg("Worker registered")
 
 	// 确保工作目录存在
 	workDir := w.config.WorkDir
@@ -297,7 +298,7 @@ func (w *Worker) Start() error {
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return fmt.Errorf("failed to create work directory: %w", err)
 	}
-	log.Printf("Work directory: %s", workDir)
+	log.Info().Str("path", workDir).Msg("Work directory ready")
 
 	// 启动心跳循环
 	go w.heartbeatLoop(resp.HeartbeatInterval)
@@ -309,7 +310,7 @@ func (w *Worker) Start() error {
 func (w *Worker) Stop() {
 	close(w.stopCh)
 	w.executor.Stop()
-	log.Printf("Worker stopped: id=%s", w.id)
+	log.Info().Str("id", w.id).Msg("Worker stopped")
 }
 
 // heartbeatLoop 心跳循环
@@ -323,7 +324,7 @@ func (w *Worker) heartbeatLoop(interval int) {
 			return
 		case <-ticker.C:
 			if err := w.sendHeartbeat(); err != nil {
-				log.Printf("Heartbeat failed: %v", err)
+				log.Error().Err(err).Msg("Heartbeat failed")
 			}
 		}
 	}
@@ -354,7 +355,7 @@ func (w *Worker) sendHeartbeat() error {
 
 	// 处理分配的任务
 	if len(resp.AssignedTasks) > 0 {
-		log.Printf("Received assigned tasks: %v", resp.AssignedTasks)
+		log.Info().Strs("tasks", resp.AssignedTasks).Msg("Received assigned tasks")
 		for _, taskID := range resp.AssignedTasks {
 			go w.executeTask(taskID)
 		}
@@ -362,7 +363,7 @@ func (w *Worker) sendHeartbeat() error {
 
 	// 处理取消的任务
 	if len(resp.CancelledTasks) > 0 {
-		log.Printf("Received cancelled tasks: %v", resp.CancelledTasks)
+		log.Info().Strs("tasks", resp.CancelledTasks).Msg("Received cancelled tasks")
 		for _, taskID := range resp.CancelledTasks {
 			w.cancelTask(taskID)
 		}
@@ -373,12 +374,12 @@ func (w *Worker) sendHeartbeat() error {
 
 // executeTask 执行任务
 func (w *Worker) executeTask(taskID string) {
-	log.Printf("Executing task: %s", taskID)
+	log.Info().Str("task_id", taskID).Msg("Executing task")
 
 	// 获取任务详情
 	task, err := w.client.FetchTask(taskID)
 	if err != nil {
-		log.Printf("Failed to fetch task %s: %v", taskID, err)
+		log.Error().Err(err).Str("task_id", taskID).Msg("Failed to fetch task")
 		return
 	}
 
@@ -419,13 +420,13 @@ func (w *Worker) executeTask(taskID string) {
 			Progress: 100,
 			Output:   result.Output,
 		})
-		log.Printf("Task completed: %s", taskID)
+		log.Info().Str("task_id", taskID).Msg("Task completed")
 	} else {
 		w.client.UpdateTask(taskID, TaskUpdateRequest{
 			Status: models.TaskStatusFailed,
 			Error:  result.Error,
 		})
-		log.Printf("Task failed: %s - %s", taskID, result.Error)
+		log.Error().Str("task_id", taskID).Str("error", result.Error).Msg("Task failed")
 	}
 
 	// 发送日志
@@ -442,9 +443,9 @@ func (w *Worker) cancelTask(taskID string) {
 
 	if exists {
 		if err := w.executor.Cancel(taskID); err != nil {
-			log.Printf("Failed to cancel task %s: %v", taskID, err)
+			log.Error().Err(err).Str("task_id", taskID).Msg("Failed to cancel task")
 		} else {
-			log.Printf("Task cancelled: %s", taskID)
+			log.Info().Str("task_id", taskID).Msg("Task cancelled")
 		}
 	}
 }
@@ -480,10 +481,24 @@ func (c *taskCallback) OnLog(taskID string, level, message string) {
 
 func (c *taskCallback) OnComplete(taskID string, result *executor.TaskResult) {
 	// 任务完成时的回调处理
-	log.Printf("Task %s execution finished with status: %s", taskID, result.Status)
+	log.Info().Str("task_id", taskID).Str("status", string(result.Status)).Msg("Task execution finished")
 }
 
 func main() {
+	// 初始化日志
+	logLevel := os.Getenv("COWORK_LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	logFormat := os.Getenv("COWORK_LOG_FORMAT")
+	if logFormat == "" {
+		logFormat = "text"
+	}
+	logger.Configure(logger.Config{
+		Level:  logLevel,
+		Format: logFormat,
+	})
+
 	// 命令行参数
 	name := flag.String("name", "", "Worker name (required)")
 	tagsStr := flag.String("tags", "", "Worker tags (comma-separated)")
@@ -495,10 +510,10 @@ func main() {
 
 	// 验证参数
 	if *name == "" {
-		log.Fatal("Worker name is required")
+		log.Fatal().Msg("Worker name is required")
 	}
 	if *tagsStr == "" {
-		log.Fatal("Worker tags are required")
+		log.Fatal().Msg("Worker tags are required")
 	}
 
 	// 解析标签
@@ -521,10 +536,10 @@ func main() {
 
 	// 启动 Worker
 	if err := worker.Start(); err != nil {
-		log.Fatalf("Failed to start worker: %v", err)
+		log.Fatal().Err(err).Msg("Failed to start worker")
 	}
 
-	log.Printf("Worker started: name=%s, tags=%v, model=%s", cfg.Name, cfg.Tags, cfg.Model)
+	log.Info().Str("name", cfg.Name).Strs("tags", cfg.Tags).Str("model", cfg.Model).Msg("Worker started")
 
 	// 等待中断信号
 	sigCh := make(chan os.Signal, 1)
@@ -533,7 +548,7 @@ func main() {
 
 	// 停止 Worker
 	worker.Stop()
-	log.Println("Worker shutdown complete")
+	log.Info().Msg("Worker shutdown complete")
 }
 
 // readFile 辅助函数

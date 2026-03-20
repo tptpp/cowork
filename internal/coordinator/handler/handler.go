@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/tp/cowork/internal/gateway/scheduler"
-	"github.com/tp/cowork/internal/gateway/store"
-	"github.com/tp/cowork/internal/gateway/ws"
+	"github.com/tp/cowork/internal/coordinator/scheduler"
+	"github.com/tp/cowork/internal/coordinator/store"
+	"github.com/tp/cowork/internal/coordinator/ws"
 	"github.com/tp/cowork/internal/shared/errors"
 	"github.com/tp/cowork/internal/shared/models"
 )

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,13 +11,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/rs/zerolog/log"
-	"github.com/tp/cowork/internal/gateway/handler"
-	"github.com/tp/cowork/internal/gateway/middleware"
-	"github.com/tp/cowork/internal/gateway/scheduler"
-	"github.com/tp/cowork/internal/gateway/store"
-	"github.com/tp/cowork/internal/gateway/ws"
-	"github.com/tp/cowork/internal/shared/logger"
+	"github.com/tp/cowork/internal/coordinator/handler"
+	"github.com/tp/cowork/internal/coordinator/middleware"
+	"github.com/tp/cowork/internal/coordinator/scheduler"
+	"github.com/tp/cowork/internal/coordinator/store"
+	"github.com/tp/cowork/internal/coordinator/ws"
 )
 
 var upgrader = websocket.Upgrader{
@@ -28,20 +27,6 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
-	// 初始化日志
-	logLevel := os.Getenv("COWORK_LOG_LEVEL")
-	if logLevel == "" {
-		logLevel = "info"
-	}
-	logFormat := os.Getenv("COWORK_LOG_FORMAT")
-	if logFormat == "" {
-		logFormat = "text"
-	}
-	logger.Configure(logger.Config{
-		Level:  logLevel,
-		Format: logFormat,
-	})
-
 	// 初始化数据库
 	dbPath := os.Getenv("COWORK_DB_PATH")
 	if dbPath == "" {
@@ -50,11 +35,11 @@ func main() {
 
 	s, err := store.New(store.Config{Path: dbPath})
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize store")
+		log.Fatalf("Failed to initialize store: %v", err)
 	}
 	defer s.Close()
 
-	log.Info().Str("path", dbPath).Msg("Database initialized")
+	log.Printf("Database initialized: %s", dbPath)
 
 	// 初始化 WebSocket Hub
 	hub := ws.NewHub()
@@ -93,7 +78,7 @@ func main() {
 
 	corsConfig := middleware.DefaultCORSConfig()
 	corsConfig.AllowedOrigins = middleware.ParseOrigins(corsOrigins)
-	log.Info().Strs("origins", corsConfig.AllowedOrigins).Msg("CORS configured")
+	log.Printf("CORS allowed origins: %v", corsConfig.AllowedOrigins)
 
 	// CORS 中间件
 	r.Use(middleware.CORS(corsConfig))
@@ -101,10 +86,10 @@ func main() {
 	// API 认证配置
 	authConfig := middleware.DefaultAuthConfig()
 	if len(authConfig.APIKeys) > 0 {
-		log.Info().Int("key_count", len(authConfig.APIKeys)).Msg("API Key authentication enabled")
+		log.Printf("API Key authentication enabled with %d keys", len(authConfig.APIKeys))
 	}
 	if authConfig.JWTSecret != "" {
-		log.Info().Msg("JWT authentication enabled")
+		log.Println("JWT authentication enabled")
 	}
 
 	// 健康检查（无需认证）
@@ -116,7 +101,7 @@ func main() {
 	r.GET("/ws", func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
-			log.Error().Err(err).Msg("WebSocket upgrade error")
+			log.Printf("WebSocket upgrade error: %v", err)
 			return
 		}
 
@@ -182,9 +167,9 @@ func main() {
 
 	// 优雅关闭
 	go func() {
-		log.Info().Str("addr", addr).Msg("Gateway starting")
+		log.Printf("Coordinator starting on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("Failed to start server")
+			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
@@ -193,14 +178,14 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Info().Msg("Shutting down Gateway...")
+	log.Println("Shutting down Coordinator...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Error().Err(err).Msg("Server shutdown error")
+		log.Printf("Server shutdown error: %v", err)
 	}
 
-	log.Info().Msg("Gateway stopped")
+	log.Println("Coordinator stopped")
 }

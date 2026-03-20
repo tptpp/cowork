@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/tp/cowork/internal/shared/models"
-	"github.com/tp/cowork/internal/gateway/store"
-	"github.com/tp/cowork/internal/gateway/ws"
+	"github.com/tp/cowork/internal/coordinator/store"
+	"github.com/tp/cowork/internal/coordinator/ws"
 )
 
 // Config 调度器配置
