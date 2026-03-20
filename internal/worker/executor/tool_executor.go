@@ -440,9 +440,14 @@ func (v *SchemaValidator) Validate(toolName string, args map[string]interface{})
 		return fmt.Errorf("tool not found: %s", toolName)
 	}
 
-	// 获取参数定义
-	params, ok := toolDef.Parameters["properties"].(map[string]interface{})
-	if !ok {
+	// 获取参数定义 - 支持多种类型
+	var params map[string]interface{}
+	switch p := toolDef.Parameters["properties"].(type) {
+	case map[string]interface{}:
+		params = p
+	case models.JSON:
+		params = p
+	default:
 		return nil // 没有参数定义，跳过验证
 	}
 
