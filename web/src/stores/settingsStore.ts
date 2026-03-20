@@ -2,23 +2,18 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
-export type DefaultModel = 'default' | 'openai' | 'anthropic' | 'glm'
 
 export interface ModelConfig {
-  openaiApiKey: string
-  openaiBaseUrl: string
-  anthropicApiKey: string
-  anthropicBaseUrl: string
-  glmApiKey: string
-  glmBaseUrl: string
-  defaultModel: DefaultModel
+  baseUrl: string    // API 端点地址，如 https://api.openai.com/v1
+  modelName: string  // 模型名称，如 gpt-4、claude-3-opus、glm-4
+  apiKey?: string    // API Key（可选）
 }
 
 interface SettingsState {
   // Theme
   theme: ThemeMode
 
-  // Model config
+  // Model config (simplified unified config)
   modelConfig: ModelConfig
 
   // Actions
@@ -28,13 +23,9 @@ interface SettingsState {
 }
 
 const defaultModelConfig: ModelConfig = {
-  openaiApiKey: '',
-  openaiBaseUrl: '',
-  anthropicApiKey: '',
-  anthropicBaseUrl: '',
-  glmApiKey: '',
-  glmBaseUrl: '',
-  defaultModel: 'default',
+  baseUrl: '',
+  modelName: '',
+  apiKey: '',
 }
 
 export const useSettingsStore = create<SettingsState>()(
