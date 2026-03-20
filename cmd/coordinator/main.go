@@ -157,6 +157,12 @@ func main() {
 		api.DELETE("/agent/sessions/:id", h.DeleteAgentSession)
 		api.POST("/agent/sessions/:id/messages", h.SendAgentMessage)
 		api.GET("/agent/sessions/:id/messages", h.GetAgentMessages)
+		// Agent Function Calling API
+		api.POST("/agent/sessions/:id/messages/tools", h.SendAgentMessageWithTools)
+		api.GET("/agent/sessions/:id/tools/executions", h.GetAgentToolExecutions)
+		api.POST("/agent/sessions/:id/tools/execute", h.ExecuteToolCall)
+		api.GET("/agent/tools", h.GetAvailableTools)
+		api.GET("/agent/tools/:name", h.GetToolDefinition)
 
 		// Tool API
 		api.GET("/tools", h.GetTools)

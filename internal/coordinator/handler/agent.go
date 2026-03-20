@@ -825,3 +825,88 @@ func (h *AgentHandler) GetToolDefinition(c *gin.Context) {
 
 	success(c, tool)
 }
+
+// ExecuteToolCallRequest 执行工具调用请求
+type ExecuteToolCallRequest struct {
+	ToolCallID string `json:"tool_call_id" binding:"required"`
+	Approved   bool   `json:"approved"`
+}
+
+// ExecuteToolCall 执行工具调用 (Human-in-loop 批准/拒绝)
+func (h *AgentHandler) ExecuteToolCall(c *gin.Context) {
+	sessionID := c.Param("id")
+
+	// 检查会话是否存在
+	_, err := h.store.Get(sessionID)
+	if err != nil {
+		failWithError(c, errors.SessionNotFound(sessionID))
+		return
+	}
+
+	var req ExecuteToolCallRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failWithError(c, errors.InvalidRequest(err.Error()))
+		return
+	}
+
+	// 获取工具执行记录
+	execution, err := h.toolExecStore.GetByToolCallID(req.ToolCallID)
+	if err != nil {
+		failWithError(c, errors.WrapInternal("Tool execution not found", err))
+		return
+	}
+
+	if !req.Approved {
+		// 用户拒绝执行
+		execution.Status = string(models.ToolExecutionStatusRejected)
+		h.toolExecStore.Update(execution)
+
+		success(c, gin.H{
+			"status":  "rejected",
+			"message": "Tool execution rejected by user",
+		})
+		return
+	}
+
+	// 用户批准执行 - 更新状态并触发执行
+	execution.Status = string(models.ToolExecutionStatusRunning)
+	h.toolExecStore.Update(execution)
+
+	// 执行工具 (如果有协调器)
+	if h.coordinator != nil {
+		// 通过协调器执行工具
+		result, err := h.coordinator.ExecuteToolDirectly(c.Request.Context(), execution)
+		if err != nil {
+			execution.Status = string(models.ToolExecutionStatusFailed)
+			execution.Result = err.Error()
+			execution.IsError = true
+			h.toolExecStore.Update(execution)
+
+			failWithError(c, errors.WrapInternal("Tool execution failed", err))
+			return
+		}
+
+		execution.Status = string(models.ToolExecutionStatusCompleted)
+		execution.Result = result
+		h.toolExecStore.Update(execution)
+
+		success(c, gin.H{
+			"status":  "completed",
+			"result":  result,
+			"message": "Tool executed successfully",
+		})
+		return
+	}
+
+	// 没有协调器，返回模拟结果
+	mockResult := fmt.Sprintf("Tool '%s' executed successfully (mock mode)", execution.ToolName)
+	execution.Status = string(models.ToolExecutionStatusCompleted)
+	execution.Result = mockResult
+	h.toolExecStore.Update(execution)
+
+	success(c, gin.H{
+		"status":  "completed",
+		"result":  mockResult,
+		"message": "Tool executed successfully (mock mode - no coordinator)",
+	})
+}

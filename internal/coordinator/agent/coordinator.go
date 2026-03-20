@@ -379,6 +379,42 @@ func (c *ConversationCoordinator) GetPendingToolCalls(sessionID string) ([]model
 	return c.scheduler.ListPendingExecutions(sessionID)
 }
 
+// ExecuteToolDirectly 直接执行工具 (用于 Human-in-loop 批准后执行)
+func (c *ConversationCoordinator) ExecuteToolDirectly(
+	ctx context.Context,
+	execution *models.ToolExecution,
+) (string, error) {
+	// 获取工具定义
+	toolDef, err := c.registry.Get(execution.ToolName)
+	if err != nil {
+		return "", fmt.Errorf("tool not found: %s", execution.ToolName)
+	}
+
+	// 构建 ToolCall
+	argsJSON, _ := json.Marshal(execution.Arguments)
+	toolCall := models.ToolCall{
+		ID:   execution.ToolCallID,
+		Type: "function",
+		Function: models.FunctionCall{
+			Name:      execution.ToolName,
+			Arguments: string(argsJSON),
+		},
+	}
+
+	// 执行工具
+	if toolDef.ExecuteMode == models.ToolExecuteModeLocal {
+		// 本地工具直接执行
+		result, err := c.engine.ExecuteToolCall(execution.ConversationID, toolCall)
+		if err != nil {
+			return "", err
+		}
+		return result.Result, nil
+	}
+
+	// 远程工具 - 返回提示信息
+	return fmt.Sprintf("Remote tool '%s' queued for execution. Requires worker.", execution.ToolName), nil
+}
+
 // ContinueWithToolResults 继续对话 (使用工具结果)
 func (c *ConversationCoordinator) ContinueWithToolResults(
 	ctx context.Context,

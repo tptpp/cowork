@@ -475,6 +475,7 @@ const (
 	ToolExecutionStatusRunning   ToolExecutionStatus = "running"
 	ToolExecutionStatusCompleted ToolExecutionStatus = "completed"
 	ToolExecutionStatusFailed    ToolExecutionStatus = "failed"
+	ToolExecutionStatusRejected  ToolExecutionStatus = "rejected"
 )
 
 // ========== Phase 5: 任务拆解能力 ==========

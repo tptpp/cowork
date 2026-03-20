@@ -748,6 +748,31 @@ func (h *Handler) GetAgentMessages(c *gin.Context) {
 	h.agentHandler.GetAgentMessages(c)
 }
 
+// SendAgentMessageWithTools 发送带工具支持的消息 (Function Calling)
+func (h *Handler) SendAgentMessageWithTools(c *gin.Context) {
+	h.agentHandler.SendAgentMessageWithTools(c)
+}
+
+// GetAgentToolExecutions 获取会话的工具执行记录
+func (h *Handler) GetAgentToolExecutions(c *gin.Context) {
+	h.agentHandler.GetAgentToolExecutions(c)
+}
+
+// ExecuteToolCall 执行工具调用 (Human-in-loop 批准)
+func (h *Handler) ExecuteToolCall(c *gin.Context) {
+	h.agentHandler.ExecuteToolCall(c)
+}
+
+// GetAvailableTools 获取可用工具列表
+func (h *Handler) GetAvailableTools(c *gin.Context) {
+	h.agentHandler.GetAvailableTools(c)
+}
+
+// GetToolDefinition 获取工具定义
+func (h *Handler) GetToolDefinition(c *gin.Context) {
+	h.agentHandler.GetToolDefinition(c)
+}
+
 // Notification API
 
 // GetNotifications 获取通知列表
