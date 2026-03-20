@@ -39,6 +39,14 @@ export const WIDGET_REGISTRY: Record<WidgetType, WidgetDefinition> = {
     defaultSize: { w: 6, h: 5 },
     minSize: { w: 4, h: 4 },
   },
+  'todo-list': {
+    type: 'todo-list',
+    name: 'Todo List',
+    icon: 'CheckSquare',
+    description: 'Personal task checklist',
+    defaultSize: { w: 4, h: 4 },
+    minSize: { w: 3, h: 3 },
+  },
 }
 
 // Default widgets configuration

@@ -22,6 +22,7 @@ import {
 } from '@/components/widgets'
 import { AgentChatWidget } from '@/components/widgets/AgentChatWidget'
 import { NotificationWidget } from '@/components/widgets/NotificationWidget'
+import { TodoWidget } from '@/components/widgets/TodoWidget'
 import { ToastContainer } from '@/components/ui/Toast'
 import { SettingsPage } from '@/components/Settings'
 import { useLayoutStore } from '@/stores/layoutStore'
@@ -47,6 +48,8 @@ function WidgetRenderer({ widget, onSelectTask }: { widget: WidgetConfig; onSele
       return <WorkerStatusWidget />
     case 'agent-chat':
       return <AgentChatWidget />
+    case 'todo-list':
+      return <TodoWidget />
     default:
       return (
         <div className="flex items-center justify-center h-full text-muted-foreground">

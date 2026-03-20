@@ -92,6 +92,7 @@ export type WidgetType =
   | 'task-queue'
   | 'worker-status'
   | 'agent-chat'
+  | 'todo-list'
 
 export interface GridLayoutItem {
   x: number
