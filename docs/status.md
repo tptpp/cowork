@@ -15,6 +15,7 @@
 | | 多模型支持 | ✅ | OpenAI/Anthropic/GLM 路由 |
 | | 流式响应 (SSE) | ✅ | 实时逐字显示 |
 | | 对话历史持久化 | ✅ | SQLite 存储 |
+| | 前后端联调 | ✅ | 2026-03-21 验证通过 |
 | 场景三：Docker 容器任务 | Docker 环境声明 | ✅ | 标签系统支持，自动路由到 Docker Worker |
 | | 容器创建/销毁 | ✅ | DockerExecutor 完整实现 |
 | | 资源限制配置 | ✅ | CPU/内存限制、网络隔离 |
