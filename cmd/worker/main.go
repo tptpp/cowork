@@ -23,12 +23,14 @@ import (
 
 // WorkerConfig Worker 配置
 type WorkerConfig struct {
-	Name            string
-	Tags            []string
-	Model           string
-	CoordinatorURL  string
-	MaxConcurrent   int
-	WorkDir         string
+	Name           string
+	Tags           []string
+	Model          string
+	CoordinatorURL string
+	MaxConcurrent  int
+	WorkDir        string
+	DockerEnabled  bool
+	DockerImage    string
 }
 
 // CoordinatorClient Coordinator 客户端
@@ -235,14 +237,15 @@ func (c *CoordinatorClient) SendTaskLog(taskID string, level, message string) er
 
 // Worker 工作节点
 type Worker struct {
-	config   *WorkerConfig
-	client   *CoordinatorClient
-	executor *executor.Executor
-	id       string
-	status   string
-	tasks    map[string]*RunningTask
-	tasksMu  sync.RWMutex
-	stopCh   chan struct{}
+	config         *WorkerConfig
+	client         *CoordinatorClient
+	executor       *executor.Executor
+	dockerExecutor *executor.DockerExecutor
+	id             string
+	status         string
+	tasks          map[string]*RunningTask
+	tasksMu        sync.RWMutex
+	stopCh         chan struct{}
 }
 
 // RunningTask 运行中的任务
@@ -268,7 +271,7 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 		execConfig.BaseWorkDir = cfg.WorkDir
 	}
 
-	return &Worker{
+	worker := &Worker{
 		config:   cfg,
 		client:   NewCoordinatorClient(cfg.CoordinatorURL),
 		executor: executor.New(execConfig),
@@ -276,6 +279,28 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 		tasks:    make(map[string]*RunningTask),
 		stopCh:   make(chan struct{}),
 	}
+
+	// 初始化 Docker 执行器（如果启用）
+	if cfg.DockerEnabled {
+		dockerConfig := executor.DockerConfigFromEnv()
+		dockerConfig.Enabled = true
+		if cfg.DockerImage != "" {
+			dockerConfig.DefaultImage = cfg.DockerImage
+		}
+		if cfg.WorkDir != "" {
+			dockerConfig.WorkDirBase = cfg.WorkDir
+		}
+
+		dockerExec, err := executor.NewDockerExecutor(dockerConfig)
+		if err != nil {
+			log.Warn().Err(err).Msg("Docker executor not available, falling back to local execution")
+		} else {
+			worker.dockerExecutor = dockerExec
+			log.Info().Str("image", dockerConfig.DefaultImage).Msg("Docker executor enabled")
+		}
+	}
+
+	return worker
 }
 
 // Start 启动 Worker
@@ -310,6 +335,9 @@ func (w *Worker) Start() error {
 func (w *Worker) Stop() {
 	close(w.stopCh)
 	w.executor.Stop()
+	if w.dockerExecutor != nil {
+		w.dockerExecutor.Cleanup()
+	}
 	log.Info().Str("id", w.id).Msg("Worker stopped")
 }
 
@@ -410,8 +438,19 @@ func (w *Worker) executeTask(taskID string) {
 		taskID: taskID,
 	}
 
-	// 执行任务
-	result := w.executor.Execute(task, callback)
+	// 根据任务类型选择执行器
+	var result *executor.TaskResult
+	if w.shouldUseDocker(task) {
+		if w.dockerExecutor != nil {
+			log.Info().Str("task_id", taskID).Msg("Using Docker executor")
+			result = w.dockerExecutor.Execute(task, callback)
+		} else {
+			log.Warn().Str("task_id", taskID).Msg("Docker requested but not available, using local executor")
+			result = w.executor.Execute(task, callback)
+		}
+	} else {
+		result = w.executor.Execute(task, callback)
+	}
 
 	// 更新任务状态
 	if result.Status == models.TaskStatusCompleted {
@@ -433,6 +472,33 @@ func (w *Worker) executeTask(taskID string) {
 	for _, logEntry := range result.Logs {
 		w.client.SendTaskLog(taskID, logEntry.Level, logEntry.Message)
 	}
+}
+
+// shouldUseDocker 判断是否应该使用 Docker 执行
+func (w *Worker) shouldUseDocker(task *models.Task) bool {
+	// 如果 Docker 未启用，不使用
+	if w.dockerExecutor == nil {
+		return false
+	}
+
+	// 检查任务类型
+	if task.Type == "docker" || task.Type == "sandbox" {
+		return true
+	}
+
+	// 检查输入中的显式指定
+	if useDocker, ok := task.Input["use_docker"].(bool); ok && useDocker {
+		return true
+	}
+
+	// 检查任务标签
+	for _, tag := range task.RequiredTags {
+		if tag == "docker" || tag == "isolated" || tag == "sandbox" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // cancelTask 取消任务
@@ -506,6 +572,8 @@ func main() {
 	coordinator := flag.String("coordinator", "http://localhost:8080", "Coordinator URL")
 	maxConcurrent := flag.Int("max-concurrent", 1, "Maximum concurrent tasks")
 	workDir := flag.String("work-dir", "", "Base work directory")
+	dockerEnabled := flag.Bool("docker", false, "Enable Docker executor")
+	dockerImage := flag.String("docker-image", "alpine:latest", "Default Docker image for tasks")
 	flag.Parse()
 
 	// 验证参数
@@ -530,6 +598,8 @@ func main() {
 		CoordinatorURL: *coordinator,
 		MaxConcurrent:  *maxConcurrent,
 		WorkDir:        *workDir,
+		DockerEnabled:  *dockerEnabled,
+		DockerImage:    *dockerImage,
 	}
 
 	worker := NewWorker(cfg)
