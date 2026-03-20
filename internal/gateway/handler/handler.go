@@ -11,6 +11,7 @@ import (
 	"github.com/tp/cowork/internal/gateway/scheduler"
 	"github.com/tp/cowork/internal/gateway/store"
 	"github.com/tp/cowork/internal/gateway/ws"
+	"github.com/tp/cowork/internal/shared/errors"
 	"github.com/tp/cowork/internal/shared/models"
 )
 
@@ -101,6 +102,17 @@ func fail(c *gin.Context, status int, code, message string) {
 	})
 }
 
+// failWithError 使用 AppError 失败响应
+func failWithError(c *gin.Context, err *errors.AppError) {
+	c.JSON(err.Code.HTTPStatus(), Response{
+		Success: false,
+		Error: &ErrorInfo{
+			Code:    string(err.Code),
+			Message: err.Message,
+		},
+	})
+}
+
 // SystemStats 系统统计信息
 type SystemStats struct {
 	Tasks   TaskStats   `json:"tasks"`
@@ -136,7 +148,7 @@ func (h *Handler) GetSystemStats(c *gin.Context) {
 	// 使用单次查询获取任务统计（优化）
 	taskCounts, err := h.taskStore.CountByStatus()
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get task stats")
+		failWithError(c, errors.WrapInternal("Failed to get task stats", err))
 		return
 	}
 
@@ -149,7 +161,7 @@ func (h *Handler) GetSystemStats(c *gin.Context) {
 	// 使用单次查询获取 Worker 统计（优化）
 	workerCounts, err := h.workerStore.CountByStatus()
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get worker stats")
+		failWithError(c, errors.WrapInternal("Failed to get worker stats", err))
 		return
 	}
 
@@ -209,7 +221,7 @@ type CreateTaskRequest struct {
 func (h *Handler) CreateTask(c *gin.Context) {
 	var req CreateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
@@ -232,7 +244,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 	}
 
 	if err := h.taskStore.Create(task); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create task")
+		failWithError(c, errors.WrapInternal("Failed to create task", err))
 		return
 	}
 
@@ -258,7 +270,7 @@ func (h *Handler) GetTasks(c *gin.Context) {
 
 	tasks, total, err := h.taskStore.List(opts)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get tasks")
+		failWithError(c, errors.WrapInternal("Failed to get tasks", err))
 		return
 	}
 
@@ -280,7 +292,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	task, err := h.taskStore.Get(id)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Task not found")
+		failWithError(c, errors.TaskNotFound(id))
 		return
 	}
 	success(c, task)
@@ -291,17 +303,17 @@ func (h *Handler) CancelTask(c *gin.Context) {
 	id := c.Param("id")
 	task, err := h.taskStore.Get(id)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Task not found")
+		failWithError(c, errors.TaskNotFound(id))
 		return
 	}
 
 	// 检查任务是否可以被取消
 	if task.Status == models.TaskStatusCompleted {
-		fail(c, http.StatusBadRequest, "INVALID_STATE", "Cannot cancel a completed task")
+		failWithError(c, errors.New(errors.CodeTaskInvalidState, "Cannot cancel a completed task"))
 		return
 	}
 	if task.Status == models.TaskStatusCancelled {
-		fail(c, http.StatusBadRequest, "INVALID_STATE", "Task is already cancelled")
+		failWithError(c, errors.New(errors.CodeTaskInvalidState, "Task is already cancelled"))
 		return
 	}
 
@@ -312,7 +324,7 @@ func (h *Handler) CancelTask(c *gin.Context) {
 	task.CompletedAt = &now
 
 	if err := h.taskStore.Update(task); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to cancel task")
+		failWithError(c, errors.WrapInternal("Failed to cancel task", err))
 		return
 	}
 
@@ -335,7 +347,7 @@ func (h *Handler) GetTaskLogs(c *gin.Context) {
 
 	logs, err := h.taskLogStore.List(id, limit, offset)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get logs")
+		failWithError(c, errors.WrapInternal("Failed to get logs", err))
 		return
 	}
 
@@ -360,7 +372,7 @@ type RegisterWorkerRequest struct {
 func (h *Handler) RegisterWorker(c *gin.Context) {
 	var req RegisterWorkerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
@@ -370,7 +382,7 @@ func (h *Handler) RegisterWorker(c *gin.Context) {
 		existing.Status = models.WorkerStatusIdle
 		existing.LastSeen = time.Now()
 		if err := h.workerStore.Update(existing); err != nil {
-			fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update worker")
+			failWithError(c, errors.WrapInternal("Failed to update worker", err))
 			return
 		}
 		success(c, gin.H{
@@ -401,7 +413,7 @@ func (h *Handler) RegisterWorker(c *gin.Context) {
 	}
 
 	if err := h.workerStore.Create(worker); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create worker")
+		failWithError(c, errors.WrapInternal("Failed to create worker", err))
 		return
 	}
 
@@ -435,14 +447,14 @@ func (h *Handler) WorkerHeartbeat(c *gin.Context) {
 
 	var req HeartbeatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
 	// 获取 Worker
 	worker, err := h.workerStore.Get(id)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Worker not found")
+		failWithError(c, errors.WorkerNotFound(id))
 		return
 	}
 
@@ -450,7 +462,7 @@ func (h *Handler) WorkerHeartbeat(c *gin.Context) {
 	worker.Status = req.Status
 	worker.LastSeen = time.Now()
 	if err := h.workerStore.Update(worker); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update worker")
+		failWithError(c, errors.WrapInternal("Failed to update worker", err))
 		return
 	}
 
@@ -468,7 +480,7 @@ func (h *Handler) WorkerHeartbeat(c *gin.Context) {
 func (h *Handler) GetWorkers(c *gin.Context) {
 	workers, err := h.workerStore.List()
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get workers")
+		failWithError(c, errors.WrapInternal("Failed to get workers", err))
 		return
 	}
 
@@ -492,7 +504,7 @@ func (h *Handler) GetWorker(c *gin.Context) {
 	id := c.Param("id")
 	worker, err := h.workerStore.Get(id)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Worker not found")
+		failWithError(c, errors.WorkerNotFound(id))
 		return
 	}
 	success(c, worker)
@@ -502,7 +514,7 @@ func (h *Handler) GetWorker(c *gin.Context) {
 func (h *Handler) UnregisterWorker(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.workerStore.Delete(id); err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Worker not found")
+		failWithError(c, errors.WorkerNotFound(id))
 		return
 	}
 	success(c, gin.H{"id": id})
@@ -522,13 +534,13 @@ func (h *Handler) UpdateTaskStatus(c *gin.Context) {
 
 	var req UpdateTaskStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
 	task, err := h.taskStore.Get(id)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Task not found")
+		failWithError(c, errors.TaskNotFound(id))
 		return
 	}
 
@@ -551,7 +563,7 @@ func (h *Handler) UpdateTaskStatus(c *gin.Context) {
 	}
 
 	if err := h.taskStore.Update(task); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update task")
+		failWithError(c, errors.WrapInternal("Failed to update task", err))
 		return
 	}
 
@@ -574,14 +586,14 @@ func (h *Handler) CreateTaskLog(c *gin.Context) {
 
 	var req CreateTaskLogRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
 	// 验证任务存在
 	_, err := h.taskStore.Get(id)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Task not found")
+		failWithError(c, errors.TaskNotFound(id))
 		return
 	}
 
@@ -598,7 +610,7 @@ func (h *Handler) CreateTaskLog(c *gin.Context) {
 	}
 
 	if err := h.taskLogStore.Create(taskLog); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create log")
+		failWithError(c, errors.WrapInternal("Failed to create log", err))
 		return
 	}
 
@@ -683,12 +695,12 @@ type SaveLayoutRequest struct {
 func (h *Handler) SaveLayout(c *gin.Context) {
 	var req SaveLayoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
 	if err := h.userLayoutStore.Save(DefaultUserID, req.Widgets); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to save layout")
+		failWithError(c, errors.WrapInternal("Failed to save layout", err))
 		return
 	}
 
@@ -738,7 +750,7 @@ func (h *Handler) GetNotifications(c *gin.Context) {
 
 	notifications, err := h.notificationStore.List(unreadOnly, limit)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get notifications")
+		failWithError(c, errors.WrapInternal("Failed to get notifications", err))
 		return
 	}
 
@@ -751,17 +763,17 @@ func (h *Handler) MarkNotificationsRead(c *gin.Context) {
 		IDs []uint `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
 	if len(req.IDs) == 0 {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "No notification IDs provided")
+		failWithError(c, errors.InvalidRequest("No notification IDs provided"))
 		return
 	}
 
 	if err := h.notificationStore.MarkRead(req.IDs); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to mark notifications as read")
+		failWithError(c, errors.WrapInternal("Failed to mark notifications as read", err))
 		return
 	}
 
@@ -771,7 +783,7 @@ func (h *Handler) MarkNotificationsRead(c *gin.Context) {
 // MarkAllNotificationsRead 标记所有通知已读
 func (h *Handler) MarkAllNotificationsRead(c *gin.Context) {
 	if err := h.notificationStore.MarkAllRead(); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to mark all notifications as read")
+		failWithError(c, errors.WrapInternal("Failed to mark all notifications as read", err))
 		return
 	}
 

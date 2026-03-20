@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tp/cowork/internal/gateway/store"
+	"github.com/tp/cowork/internal/shared/errors"
 	"github.com/tp/cowork/internal/shared/models"
 )
 
@@ -143,7 +144,7 @@ type CreateAgentSessionRequest struct {
 func (h *AgentHandler) CreateAgentSession(c *gin.Context) {
 	var req CreateAgentSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
@@ -162,7 +163,7 @@ func (h *AgentHandler) CreateAgentSession(c *gin.Context) {
 	}
 
 	if err := h.store.Create(session); err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create session")
+		failWithError(c, errors.WrapInternal("Failed to create session", err))
 		return
 	}
 
@@ -174,14 +175,14 @@ func (h *AgentHandler) GetAgentSession(c *gin.Context) {
 	id := c.Param("id")
 	session, err := h.store.Get(id)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Session not found")
+		failWithError(c, errors.SessionNotFound(id))
 		return
 	}
 
 	// 获取消息
 	messages, err := h.store.GetMessages(id, 100)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get messages")
+		failWithError(c, errors.WrapInternal("Failed to get messages", err))
 		return
 	}
 
@@ -195,7 +196,7 @@ func (h *AgentHandler) GetAgentSession(c *gin.Context) {
 func (h *AgentHandler) GetAgentSessions(c *gin.Context) {
 	sessions, err := h.store.List()
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get sessions")
+		failWithError(c, errors.WrapInternal("Failed to get sessions", err))
 		return
 	}
 
@@ -206,7 +207,7 @@ func (h *AgentHandler) GetAgentSessions(c *gin.Context) {
 func (h *AgentHandler) DeleteAgentSession(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.store.Delete(id); err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Session not found")
+		failWithError(c, errors.SessionNotFound(id))
 		return
 	}
 
@@ -225,27 +226,27 @@ func (h *AgentHandler) SendAgentMessage(c *gin.Context) {
 	// 检查会话是否存在
 	session, err := h.store.Get(sessionID)
 	if err != nil {
-		fail(c, http.StatusNotFound, "NOT_FOUND", "Session not found")
+		failWithError(c, errors.SessionNotFound(sessionID))
 		return
 	}
 
 	var req SendAgentMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		failWithError(c, errors.InvalidRequest(err.Error()))
 		return
 	}
 
 	// 保存用户消息
 	_, err = h.store.AddMessage(sessionID, "user", req.Content)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to save message")
+		failWithError(c, errors.WrapInternal("Failed to save message", err))
 		return
 	}
 
 	// 获取历史消息
 	messages, err := h.store.GetMessages(sessionID, 50)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get history")
+		failWithError(c, errors.WrapInternal("Failed to get history", err))
 		return
 	}
 
@@ -585,7 +586,7 @@ func (h *AgentHandler) GetAgentMessages(c *gin.Context) {
 
 	messages, err := h.store.GetMessages(sessionID, limit)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get messages")
+		failWithError(c, errors.WrapInternal("Failed to get messages", err))
 		return
 	}
 
