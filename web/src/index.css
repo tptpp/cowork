@@ -25,6 +25,13 @@
   --ring: 262 83% 58%;
   --radius: 0.75rem;
 
+  /* Sidebar - dark theme */
+  --sidebar-background: 222 47% 11%;
+  --sidebar-foreground: 210 40% 98%;
+  --sidebar-border: 217 33% 17%;
+  --sidebar-accent: 210 40% 98%;
+  --sidebar-accent-foreground: 222 47% 11%;
+
   /* Chart colors */
   --chart-1: 262 83% 58%;
   --chart-2: 220 70% 50%;
@@ -53,6 +60,13 @@
   --border: 215 27.9% 16.9%;
   --input: 215 27.9% 16.9%;
   --ring: 263 70% 50%;
+
+  /* Sidebar - darker in dark mode */
+  --sidebar-background: 222 47% 8%;
+  --sidebar-foreground: 210 40% 98%;
+  --sidebar-border: 217 33% 14%;
+  --sidebar-accent: 210 40% 98%;
+  --sidebar-accent-foreground: 222 47% 8%;
 
   /* Chart colors - dark mode */
   --chart-1: 263 70% 50%;
