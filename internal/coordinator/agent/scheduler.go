@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -277,11 +278,71 @@ func (s *ToolScheduler) handleQueryTask(args map[string]interface{}) (string, bo
 
 // createRemoteTask 创建远程执行任务
 func (s *ToolScheduler) createRemoteTask(execution *models.ToolExecution) (*models.Task, error) {
-	if s.taskCreator == nil {
-		return nil, fmt.Errorf("task creator not configured")
+	// 获取工具定义以确定需要的能力标签
+	toolDef, err := s.registry.Get(execution.ToolName)
+	if err != nil {
+		return nil, fmt.Errorf("tool not found: %s", execution.ToolName)
 	}
 
-	return s.taskCreator.CreateTaskForToolExecution(execution)
+	// 如果有自定义任务创建器，使用它
+	if s.taskCreator != nil {
+		task, err := s.taskCreator.CreateTaskForToolExecution(execution)
+		if err != nil {
+			return nil, err
+		}
+		// 确保工具相关字段设置正确
+		task.ToolCallID = &execution.ToolCallID
+		task.ToolName = execution.ToolName
+		task.ConversationID = &execution.ConversationID
+		if task.Type == "" {
+			task.Type = "tool"
+		}
+		if task.Input == nil {
+			task.Input = execution.Arguments
+		}
+		if err := s.taskStore.Create(task); err != nil {
+			return nil, fmt.Errorf("failed to create task: %w", err)
+		}
+		return task, nil
+	}
+
+	// 默认创建逻辑
+	task := &models.Task{
+		ID:            uuid.New().String(),
+		Type:          "tool",
+		Description:   fmt.Sprintf("Execute tool: %s", execution.ToolName),
+		Status:        models.TaskStatusPending,
+		Priority:      models.PriorityMedium,
+		ToolCallID:    &execution.ToolCallID,
+		ConversationID: &execution.ConversationID,
+		ToolName:      execution.ToolName,
+		Input:         execution.Arguments,
+	}
+
+	// 根据工具类别设置所需标签
+	switch toolDef.Category {
+	case models.ToolCategorySystem:
+		task.RequiredTags = []string{"shell"}
+	case models.ToolCategoryFile:
+		task.RequiredTags = []string{"filesystem"}
+	case models.ToolCategoryWeb:
+		task.RequiredTags = []string{"network"}
+	}
+
+	// 根据权限设置隔离要求
+	if toolDef.Permission == models.ToolPermissionExecute {
+		task.RequiredTags = append(task.RequiredTags, "isolated")
+	}
+
+	// 保存任务
+	if err := s.taskStore.Create(task); err != nil {
+		return nil, fmt.Errorf("failed to create task: %w", err)
+	}
+
+	log.Printf("Created tool execution task %s for tool %s (tool_call_id: %s)",
+		task.ID, execution.ToolName, execution.ToolCallID)
+
+	return task, nil
 }
 
 // waitForTaskCompletion 等待任务完成
@@ -305,33 +366,65 @@ func (s *ToolScheduler) waitForTaskCompletion(ctx context.Context, execTask *Too
 					task.Status == models.TaskStatusFailed ||
 					task.Status == models.TaskStatusCancelled {
 					// 任务完成，更新执行记录
-					result := ""
-					isError := task.Status == models.TaskStatusFailed
-
-					if task.Output != nil {
-						if outputStr, ok := task.Output["stdout"].(string); ok {
-							result = outputStr
-						}
-						if errStr, ok := task.Output["stderr"].(string); ok && errStr != "" {
-							result += "\n" + errStr
-						}
-					}
-
-					if task.Error != nil {
-						result = *task.Error
-					}
+					result := s.extractToolResult(task)
+					isError := task.Status == models.TaskStatusFailed || task.Status == models.TaskStatusCancelled
 
 					status := string(models.ToolExecutionStatusCompleted)
 					if isError {
 						status = string(models.ToolExecutionStatusFailed)
 					}
 
+					log.Printf("Tool execution %s completed with status %s", execTask.Execution.ToolCallID, status)
 					s.toolExecStore.UpdateStatus(execTask.Execution.ID, status, result, isError)
 					return
 				}
 			}
 		}
 	}
+}
+
+// extractToolResult 从任务输出提取工具结果
+func (s *ToolScheduler) extractToolResult(task *models.Task) string {
+	if task.Error != nil {
+		return *task.Error
+	}
+
+	if task.Output == nil {
+		return ""
+	}
+
+	// 优先使用 output 字段（工具执行器设置的）
+	if outputStr, ok := task.Output["output"].(string); ok && outputStr != "" {
+		return outputStr
+	}
+
+	// 兼容 shell 命令输出格式
+	var resultParts []string
+
+	if stdout, ok := task.Output["stdout"].(string); ok && stdout != "" {
+		resultParts = append(resultParts, stdout)
+	}
+
+	if stderr, ok := task.Output["stderr"].(string); ok && stderr != "" {
+		resultParts = append(resultParts, "STDERR:", stderr)
+	}
+
+	if content, ok := task.Output["content"].(string); ok && content != "" {
+		// read_file 工具输出格式
+		return content
+	}
+
+	if len(resultParts) > 0 {
+		return strings.Join(resultParts, "\n")
+	}
+
+	// 最后尝试序列化整个输出
+	if len(task.Output) > 0 {
+		resultJSON, _ := json.Marshal(task.Output)
+		return string(resultJSON)
+	}
+
+	return ""
 }
 
 // Cancel 取消工具执行

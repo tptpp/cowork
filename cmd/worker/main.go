@@ -240,6 +240,7 @@ type Worker struct {
 	config         *WorkerConfig
 	client         *CoordinatorClient
 	executor       *executor.Executor
+	toolExecutor   *executor.ToolExecutor
 	dockerExecutor *executor.DockerExecutor
 	id             string
 	status         string
@@ -280,6 +281,10 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 		stopCh:   make(chan struct{}),
 	}
 
+	// 初始化工具执行器（使用远程注册表客户端）
+	toolRegistry := NewRemoteToolRegistry(cfg.CoordinatorURL)
+	worker.toolExecutor = executor.NewToolExecutor(execConfig, toolRegistry)
+
 	// 初始化 Docker 执行器（如果启用）
 	if cfg.DockerEnabled {
 		dockerConfig := executor.DockerConfigFromEnv()
@@ -296,6 +301,7 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 			log.Warn().Err(err).Msg("Docker executor not available, falling back to local execution")
 		} else {
 			worker.dockerExecutor = dockerExec
+			worker.toolExecutor.SetDockerExecutor(dockerExec)
 			log.Info().Str("image", dockerConfig.DefaultImage).Msg("Docker executor enabled")
 		}
 	}
@@ -440,15 +446,42 @@ func (w *Worker) executeTask(taskID string) {
 
 	// 根据任务类型选择执行器
 	var result *executor.TaskResult
-	if w.shouldUseDocker(task) {
-		if w.dockerExecutor != nil {
-			log.Info().Str("task_id", taskID).Msg("Using Docker executor")
-			result = w.dockerExecutor.Execute(task, callback)
+
+	switch task.Type {
+	case "tool":
+		// 工具执行任务 - 使用 ToolExecutor
+		log.Info().Str("task_id", taskID).Str("tool_name", task.ToolName).Msg("Executing tool task")
+		result = w.toolExecutor.ExecuteToolFromTask(task, callback)
+
+	case "shell", "script":
+		// Shell/脚本任务
+		if w.shouldUseDocker(task) {
+			if w.dockerExecutor != nil {
+				log.Info().Str("task_id", taskID).Msg("Using Docker executor")
+				result = w.dockerExecutor.Execute(task, callback)
+			} else {
+				log.Warn().Str("task_id", taskID).Msg("Docker requested but not available, using local executor")
+				result = w.executor.Execute(task, callback)
+			}
 		} else {
-			log.Warn().Str("task_id", taskID).Msg("Docker requested but not available, using local executor")
 			result = w.executor.Execute(task, callback)
 		}
-	} else {
+
+	case "docker", "sandbox":
+		// Docker 隔离任务
+		if w.dockerExecutor != nil {
+			log.Info().Str("task_id", taskID).Msg("Using Docker executor for isolated task")
+			result = w.dockerExecutor.Execute(task, callback)
+		} else {
+			result = &executor.TaskResult{
+				TaskID: taskID,
+				Status: models.TaskStatusFailed,
+				Error:  "Docker executor not available for isolated task",
+			}
+		}
+
+	default:
+		// 默认使用标准执行器
 		result = w.executor.Execute(task, callback)
 	}
 
@@ -624,4 +657,137 @@ func main() {
 // readFile 辅助函数
 func readFile(path string) ([]byte, error) {
 	return ioutil.ReadFile(path)
+}
+
+// RemoteToolRegistry 远程工具注册表客户端
+type RemoteToolRegistry struct {
+	baseURL    string
+	httpClient *http.Client
+	cache      map[string]*models.ToolDefinition
+}
+
+// NewRemoteToolRegistry 创建远程工具注册表客户端
+func NewRemoteToolRegistry(baseURL string) *RemoteToolRegistry {
+	return &RemoteToolRegistry{
+		baseURL:    baseURL,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+		cache:      make(map[string]*models.ToolDefinition),
+	}
+}
+
+// Get 获取工具定义
+func (r *RemoteToolRegistry) Get(toolName string) (*models.ToolDefinition, error) {
+	// 检查缓存
+	if tool, ok := r.cache[toolName]; ok {
+		return tool, nil
+	}
+
+	// 从 Coordinator 获取
+	url := fmt.Sprintf("%s/api/tools/%s", r.baseURL, toolName)
+	resp, err := r.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch tool definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("tool not found: %s", toolName)
+	}
+
+	var result struct {
+		Success bool                      `json:"success"`
+		Data    *models.ToolDefinition    `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if !result.Success || result.Data == nil {
+		return nil, fmt.Errorf("tool not found: %s", toolName)
+	}
+
+	// 缓存结果
+	r.cache[toolName] = result.Data
+
+	return result.Data, nil
+}
+
+// GetBuiltinTools 获取内置工具列表（简化版，直接返回已知工具）
+func (r *RemoteToolRegistry) GetBuiltinTools() []*models.ToolDefinition {
+	// 预定义的内置工具（与 Coordinator 端 builtin.go 保持一致）
+	return []*models.ToolDefinition{
+		{
+			Name:        "execute_shell",
+			Description: "在隔离环境中执行 Shell 命令",
+			Parameters: models.JSON{
+				"type": "object",
+				"properties": models.JSON{
+					"command": models.JSON{
+						"type":        "string",
+						"description": "要执行的 Shell 命令",
+					},
+					"work_dir": models.JSON{
+						"type":        "string",
+						"description": "工作目录（可选）",
+					},
+					"timeout": models.JSON{
+						"type":        "integer",
+						"description": "超时时间（秒），默认 300",
+					},
+				},
+				"required": []string{"command"},
+			},
+			Category:    models.ToolCategorySystem,
+			ExecuteMode: models.ToolExecuteModeRemote,
+			Permission:  models.ToolPermissionExecute,
+			Handler:     "execute_shell",
+			IsEnabled:   true,
+			IsBuiltin:   true,
+		},
+		{
+			Name:        "read_file",
+			Description: "读取文件内容",
+			Parameters: models.JSON{
+				"type": "object",
+				"properties": models.JSON{
+					"path": models.JSON{
+						"type":        "string",
+						"description": "文件路径",
+					},
+				},
+				"required": []string{"path"},
+			},
+			Category:    models.ToolCategoryFile,
+			ExecuteMode: models.ToolExecuteModeRemote,
+			Permission:  models.ToolPermissionRead,
+			Handler:     "read_file",
+			IsEnabled:   true,
+			IsBuiltin:   true,
+		},
+		{
+			Name:        "write_file",
+			Description: "写入文件内容",
+			Parameters: models.JSON{
+				"type": "object",
+				"properties": models.JSON{
+					"path": models.JSON{
+						"type":        "string",
+						"description": "文件路径",
+					},
+					"content": models.JSON{
+						"type":        "string",
+						"description": "文件内容",
+					},
+				},
+				"required": []string{"path", "content"},
+			},
+			Category:    models.ToolCategoryFile,
+			ExecuteMode: models.ToolExecuteModeRemote,
+			Permission:  models.ToolPermissionWrite,
+			Handler:     "write_file",
+			IsEnabled:   true,
+			IsBuiltin:   true,
+		},
+	}
 }

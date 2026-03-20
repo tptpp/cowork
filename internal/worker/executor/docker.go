@@ -83,7 +83,7 @@ func (e *DockerExecutor) Execute(task *models.Task, callback Callback) *TaskResu
 	workDir := filepath.Join(e.config.WorkDirBase, task.ID)
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		result.Status = models.TaskStatusFailed
-		result.Error = fmt.Sprintf("failed to create work directory: %w", err)
+		result.Error = fmt.Sprintf("failed to create work directory: %v", err)
 		result.EndTime = time.Now()
 		return result
 	}
@@ -96,7 +96,7 @@ func (e *DockerExecutor) Execute(task *models.Task, callback Callback) *TaskResu
 	// 2. 准备输入文件
 	if err := e.prepareInputFiles(task, workDir); err != nil {
 		result.Status = models.TaskStatusFailed
-		result.Error = fmt.Sprintf("failed to prepare input files: %w", err)
+		result.Error = fmt.Sprintf("failed to prepare input files: %v", err)
 		result.EndTime = time.Now()
 		return result
 	}
@@ -109,7 +109,7 @@ func (e *DockerExecutor) Execute(task *models.Task, callback Callback) *TaskResu
 	imageName := e.getImage(task)
 	if err := e.pullImageIfNeeded(ctx, imageName); err != nil {
 		result.Status = models.TaskStatusFailed
-		result.Error = fmt.Sprintf("failed to pull image: %w", err)
+		result.Error = fmt.Sprintf("failed to pull image: %v", err)
 		result.EndTime = time.Now()
 		return result
 	}
@@ -122,7 +122,7 @@ func (e *DockerExecutor) Execute(task *models.Task, callback Callback) *TaskResu
 	containerID, err := e.createContainer(ctx, task, workDir, imageName)
 	if err != nil {
 		result.Status = models.TaskStatusFailed
-		result.Error = fmt.Sprintf("failed to create container: %w", err)
+		result.Error = fmt.Sprintf("failed to create container: %v", err)
 		result.EndTime = time.Now()
 		return result
 	}
@@ -135,7 +135,7 @@ func (e *DockerExecutor) Execute(task *models.Task, callback Callback) *TaskResu
 	if err := e.startContainer(ctx, containerID); err != nil {
 		e.removeContainer(ctx, containerID)
 		result.Status = models.TaskStatusFailed
-		result.Error = fmt.Sprintf("failed to start container: %w", err)
+		result.Error = fmt.Sprintf("failed to start container: %v", err)
 		result.EndTime = time.Now()
 		return result
 	}
