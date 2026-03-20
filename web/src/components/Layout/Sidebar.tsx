@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  Palette,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MenuItem, type MenuItemData } from './MenuItem'
@@ -25,6 +26,11 @@ const menuItems: MenuItemData[] = [
         id: 'settings-model',
         label: 'Model Settings',
         icon: Bot,
+      },
+      {
+        id: 'settings-appearance',
+        label: 'Appearance',
+        icon: Palette,
       },
     ],
   },

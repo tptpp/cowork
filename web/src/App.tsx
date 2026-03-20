@@ -1,6 +1,6 @@
 import { Layout } from '@/components/Layout'
 import { DashboardContent } from '@/components/DashboardContent'
-import { ModelSettingsPage } from '@/components/Settings'
+import { ModelSettingsPage, AppearanceSettings } from '@/components/Settings'
 import { useNavigationStore, type PageId } from '@/stores/navigationStore'
 
 function App() {
@@ -10,6 +10,7 @@ function App() {
   const getActiveId = (): string => {
     if (activePage === 'dashboard') return 'dashboard'
     if (activePage === 'settings-model') return 'settings-model'
+    if (activePage === 'settings-appearance') return 'settings-appearance'
     return 'dashboard'
   }
 
@@ -18,6 +19,7 @@ function App() {
     const pageMap: Record<string, PageId> = {
       'dashboard': 'dashboard',
       'settings-model': 'settings-model',
+      'settings-appearance': 'settings-appearance',
     }
     if (pageMap[id]) {
       setActivePage(pageMap[id])
@@ -30,6 +32,13 @@ function App() {
         return <DashboardContent />
       case 'settings-model':
         return <ModelSettingsPage />
+      case 'settings-appearance':
+        return (
+          <div className="p-6 max-w-2xl mx-auto">
+            <h1 className="text-xl font-semibold mb-6">Appearance Settings</h1>
+            <AppearanceSettings />
+          </div>
+        )
       default:
         return <DashboardContent />
     }

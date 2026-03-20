@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type PageId = 'dashboard' | 'settings-model'
+export type PageId = 'dashboard' | 'settings-model' | 'settings-appearance'
 
 interface NavigationState {
   activePage: PageId
