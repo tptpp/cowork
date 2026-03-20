@@ -1,4 +1,4 @@
-import { Server, Wifi, WifiOff, Clock } from 'lucide-react'
+import { Server, Wifi, WifiOff } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useWorkerStore } from '@/stores/workerStore'

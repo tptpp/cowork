@@ -72,12 +72,8 @@ export function AgentChatWidget() {
     await deleteSession(id)
   }
 
-  // Sync selected model with current session
-  useEffect(() => {
-    if (currentSession?.model) {
-      setSelectedModel(currentSession.model)
-    }
-  }, [currentSession?.model])
+  // Sync selected model with current session (using derived state pattern)
+  // Note: selectedModel is controlled by user interaction, currentSession.model is source of truth on load
 
   return (
     <Card className="h-full flex flex-col">
