@@ -136,9 +136,6 @@ function MessageBubble({
   )
 }
 
-// Need to import ToolExecution type
-import type { ToolExecution } from '@/types'
-
 export function AgentChatWidget() {
   const [input, setInput] = useState('')
   const [selectedModel, setSelectedModel] = useState('default')

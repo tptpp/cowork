@@ -17,6 +17,10 @@ export interface Task {
   error: string | null
   config: Record<string, unknown>
   work_dir: string
+  // Tool execution fields
+  tool_name?: string
+  tool_call_id?: string
+  conversation_id?: string
   created_at: string
   updated_at: string
   started_at: string | null
