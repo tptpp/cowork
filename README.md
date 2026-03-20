@@ -1,5 +1,11 @@
 # Cowork - 个人多任务处理平台
 
+[![Status](https://img.shields.io/badge/status-active--development-green)](https://github.com/tptpp/cowork)
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go)](https://golang.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+
 一个支持多 Worker 并行执行、可扩展的个人任务调度平台。
 
 ## 概述
