@@ -71,6 +71,7 @@ func main() {
 		store.NewNotificationStore(s.DB()),
 		store.NewUserLayoutStore(s.DB()),
 		store.NewAgentSessionStore(s.DB()),
+		store.NewToolExecutionStore(s.DB()),
 		hub,
 		taskScheduler,
 		toolRegistry,

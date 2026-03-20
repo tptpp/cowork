@@ -7,6 +7,50 @@ import (
 	"time"
 )
 
+// ToolCall 工具调用 (OpenAI Compatible)
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"` // "function"
+	Function FunctionCall `json:"function"`
+}
+
+// FunctionCall 函数调用
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string
+}
+
+// ToolCallsArray 用于存储 ToolCall 数组
+type ToolCallsArray []ToolCall
+
+// Value 实现 driver.Valuer 接口
+func (t ToolCallsArray) Value() (driver.Value, error) {
+	if t == nil {
+		return nil, nil
+	}
+	return json.Marshal(t)
+}
+
+// Scan 实现 sql.Scanner 接口
+func (t *ToolCallsArray) Scan(value interface{}) error {
+	if value == nil {
+		*t = nil
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("type assertion to []byte failed")
+	}
+	return json.Unmarshal(bytes, t)
+}
+
+// ToolResult 工具执行结果
+type ToolResult struct {
+	ToolCallID string `json:"tool_call_id"`
+	Output     string `json:"output"`
+	IsError    bool   `json:"is_error"`
+}
+
 // JSON 类型用于存储 JSON 数据
 type JSON map[string]interface{}
 
@@ -107,6 +151,11 @@ type Task struct {
 
 	// 工作目录
 	WorkDir string `gorm:"type:varchar(255)" json:"work_dir"`
+
+	// 工具执行相关 (Phase 2 新增)
+	ToolCallID     *string `gorm:"type:varchar(64)" json:"tool_call_id"`
+	ConversationID *string `gorm:"type:varchar(64);index" json:"conversation_id"`
+	ToolName       string  `gorm:"type:varchar(100)" json:"tool_name"`
 
 	// 时间
 	CreatedAt   time.Time  `gorm:"autoCreateTime" json:"created_at"`
@@ -250,8 +299,12 @@ type AgentMessage struct {
 	SessionID string `gorm:"type:varchar(64);index;not null" json:"session_id"`
 	Session   *AgentSession `gorm:"foreignKey:SessionID" json:"-"`
 
-	Role     string    `gorm:"type:varchar(20);not null" json:"role"` // user, assistant, system
-	Content  string    `gorm:"type:text;not null" json:"content"`
+	Role     string    `gorm:"type:varchar(20);not null" json:"role"` // user, assistant, system, tool
+	Content  string    `gorm:"type:text" json:"content"`
+
+	// Tool Call 支持
+	ToolCalls  *ToolCallsArray `gorm:"type:text" json:"tool_calls,omitempty"`  // []ToolCall for assistant messages
+	ToolCallID string          `gorm:"type:varchar(64)" json:"tool_call_id,omitempty"` // 当 role=tool 时，对应的 tool_call_id
 
 	// Token 统计
 	Tokens int `json:"tokens"`

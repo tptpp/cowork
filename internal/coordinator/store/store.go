@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/tp/cowork/internal/shared/models"
 	"gorm.io/driver/sqlite"
@@ -426,6 +427,7 @@ type AgentSessionStore interface {
 	List() ([]models.AgentSession, error)
 	Delete(id string) error
 	AddMessage(sessionID string, role, content string) (*models.AgentMessage, error)
+	AddMessageWithToolCalls(msg *models.AgentMessage) error
 	GetMessages(sessionID string, limit int) ([]models.AgentMessage, error)
 }
 
@@ -483,6 +485,15 @@ func (s *agentSessionStore) AddMessage(sessionID string, role, content string) (
 	// 更新会话的 updated_at
 	s.db.Model(&models.AgentSession{}).Where("id = ?", sessionID).Update("updated_at", gorm.Expr("datetime('now')"))
 	return msg, nil
+}
+
+// AddMessageWithToolCalls 添加带 ToolCalls 的消息
+func (s *agentSessionStore) AddMessageWithToolCalls(msg *models.AgentMessage) error {
+	if err := s.db.Create(msg).Error; err != nil {
+		return err
+	}
+	// 更新会话的 updated_at
+	return s.db.Model(&models.AgentSession{}).Where("id = ?", msg.SessionID).Update("updated_at", gorm.Expr("datetime('now')")).Error
 }
 
 // GetMessages 获取消息列表
@@ -613,4 +624,89 @@ func (s *toolDefinitionStore) GetBuiltin() ([]models.ToolDefinition, error) {
 	var tools []models.ToolDefinition
 	err := s.db.Where("is_builtin = ?", true).Order("name ASC").Find(&tools).Error
 	return tools, err
+}
+
+// ToolExecutionStore 工具执行存储接口
+type ToolExecutionStore interface {
+	Create(execution *models.ToolExecution) error
+	Get(id uint) (*models.ToolExecution, error)
+	GetByToolCallID(toolCallID string) (*models.ToolExecution, error)
+	ListByConversation(conversationID string) ([]models.ToolExecution, error)
+	ListByMessage(messageID uint) ([]models.ToolExecution, error)
+	Update(execution *models.ToolExecution) error
+	UpdateStatus(id uint, status string, result string, isError bool) error
+}
+
+// toolExecutionStore 工具执行存储实现
+type toolExecutionStore struct {
+	db *gorm.DB
+}
+
+// NewToolExecutionStore 创建工具执行存储
+func NewToolExecutionStore(db *gorm.DB) ToolExecutionStore {
+	return &toolExecutionStore{db: db}
+}
+
+// Create 创建工具执行记录
+func (s *toolExecutionStore) Create(execution *models.ToolExecution) error {
+	return s.db.Create(execution).Error
+}
+
+// Get 获取工具执行记录
+func (s *toolExecutionStore) Get(id uint) (*models.ToolExecution, error) {
+	var execution models.ToolExecution
+	err := s.db.First(&execution, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
+// GetByToolCallID 根据工具调用 ID 获取执行记录
+func (s *toolExecutionStore) GetByToolCallID(toolCallID string) (*models.ToolExecution, error) {
+	var execution models.ToolExecution
+	err := s.db.Where("tool_call_id = ?", toolCallID).First(&execution).Error
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
+}
+
+// ListByConversation 获取对话的所有工具执行记录
+func (s *toolExecutionStore) ListByConversation(conversationID string) ([]models.ToolExecution, error) {
+	var executions []models.ToolExecution
+	err := s.db.Where("conversation_id = ?", conversationID).Order("created_at ASC").Find(&executions).Error
+	return executions, err
+}
+
+// ListByMessage 获取消息的所有工具执行记录
+func (s *toolExecutionStore) ListByMessage(messageID uint) ([]models.ToolExecution, error) {
+	var executions []models.ToolExecution
+	err := s.db.Where("message_id = ?", messageID).Order("created_at ASC").Find(&executions).Error
+	return executions, err
+}
+
+// Update 更新工具执行记录
+func (s *toolExecutionStore) Update(execution *models.ToolExecution) error {
+	return s.db.Save(execution).Error
+}
+
+// UpdateStatus 更新工具执行状态
+func (s *toolExecutionStore) UpdateStatus(id uint, status string, result string, isError bool) error {
+	updates := map[string]interface{}{
+		"status":   status,
+		"result":   result,
+		"is_error": isError,
+	}
+
+	if status == string(models.ToolExecutionStatusRunning) {
+		now := time.Now()
+		updates["started_at"] = &now
+	} else if status == string(models.ToolExecutionStatusCompleted) ||
+		status == string(models.ToolExecutionStatusFailed) {
+		now := time.Now()
+		updates["completed_at"] = &now
+	}
+
+	return s.db.Model(&models.ToolExecution{}).Where("id = ?", id).Updates(updates).Error
 }

@@ -24,6 +24,7 @@ type Handler struct {
 	notificationStore store.NotificationStore
 	userLayoutStore  store.UserLayoutStore
 	agentStore       store.AgentSessionStore
+	toolExecStore    store.ToolExecutionStore
 	agentHandler     *AgentHandler
 	toolHandler      *ToolHandler
 	hub              *ws.Hub
@@ -39,6 +40,7 @@ func NewHandler(
 	notificationStore store.NotificationStore,
 	userLayoutStore store.UserLayoutStore,
 	agentStore store.AgentSessionStore,
+	toolExecStore store.ToolExecutionStore,
 	hub *ws.Hub,
 	sched *scheduler.Scheduler,
 	toolRegistry *tools.Registry,
@@ -50,7 +52,8 @@ func NewHandler(
 		notificationStore: notificationStore,
 		userLayoutStore:  userLayoutStore,
 		agentStore:       agentStore,
-		agentHandler:     NewAgentHandler(agentStore),
+		toolExecStore:    toolExecStore,
+		agentHandler:     NewAgentHandler(agentStore, toolExecStore, taskStore, toolRegistry),
 		toolHandler:      NewToolHandler(toolRegistry),
 		hub:              hub,
 		scheduler:        sched,

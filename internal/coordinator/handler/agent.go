@@ -14,19 +14,40 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tp/cowork/internal/coordinator/agent"
 	"github.com/tp/cowork/internal/coordinator/store"
+	"github.com/tp/cowork/internal/coordinator/tools"
 	"github.com/tp/cowork/internal/shared/errors"
 	"github.com/tp/cowork/internal/shared/models"
 )
 
 // AgentHandler Agent API 处理器
 type AgentHandler struct {
-	store store.AgentSessionStore
+	store        store.AgentSessionStore
+	toolExecStore store.ToolExecutionStore
+	taskStore    store.TaskStore
+	registry     *tools.Registry
+	coordinator  *agent.ConversationCoordinator
 }
 
 // NewAgentHandler 创建 Agent 处理器
-func NewAgentHandler(store store.AgentSessionStore) *AgentHandler {
-	return &AgentHandler{store: store}
+func NewAgentHandler(
+	store store.AgentSessionStore,
+	toolExecStore store.ToolExecutionStore,
+	taskStore store.TaskStore,
+	registry *tools.Registry,
+) *AgentHandler {
+	return &AgentHandler{
+		store:         store,
+		toolExecStore: toolExecStore,
+		taskStore:     taskStore,
+		registry:      registry,
+	}
+}
+
+// SetCoordinator 设置协调器
+func (h *AgentHandler) SetCoordinator(coordinator *agent.ConversationCoordinator) {
+	h.coordinator = coordinator
 }
 
 // ModelConfig 模型配置
@@ -591,4 +612,216 @@ func (h *AgentHandler) GetAgentMessages(c *gin.Context) {
 	}
 
 	success(c, messages)
+}
+
+// ============ Function Calling API ============
+
+// SendAgentMessageWithToolsRequest 发送带工具支持的消息请求
+type SendAgentMessageWithToolsRequest struct {
+	Content          string   `json:"content" binding:"required"`
+	Tools            []string `json:"tools,omitempty"`             // 指定可用工具
+	AutoExecuteTools bool     `json:"auto_execute_tools,omitempty"` // 是否自动执行工具
+}
+
+// SendAgentMessageWithTools 发送消息并支持 Function Calling (SSE 流式响应)
+func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
+	sessionID := c.Param("id")
+
+	// 检查会话是否存在
+	session, err := h.store.Get(sessionID)
+	if err != nil {
+		failWithError(c, errors.SessionNotFound(sessionID))
+		return
+	}
+
+	var req SendAgentMessageWithToolsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failWithError(c, errors.InvalidRequest(err.Error()))
+		return
+	}
+
+	// 设置 SSE 响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// 获取模型配置
+	router := NewModelRouter()
+	cfg, ok := router.GetConfig(session.Model)
+	if !ok {
+		// 没有配置，使用模拟响应
+		h.mockStreamResponseWithTools(c, session.Model, req.Content)
+		return
+	}
+
+	// 如果没有协调器，使用简单模式
+	if h.coordinator == nil {
+		h.streamWithoutFunctionCalling(c, session, cfg, req.Content)
+		return
+	}
+
+	// 使用协调器处理 (支持 Function Calling)
+	onToken := func(token string) {
+		c.SSEvent("message", StreamResponse{Type: "token", Content: token})
+		c.Writer.Flush()
+	}
+
+	result, err := h.coordinator.ProcessMessage(
+		c.Request.Context(),
+		sessionID,
+		req.Content,
+		agent.ModelConfig{
+			Type:    cfg.Type,
+			APIKey:  cfg.APIKey,
+			BaseURL: cfg.BaseURL,
+			Model:   cfg.Model,
+		},
+		req.Tools,
+		onToken,
+	)
+
+	if err != nil {
+		c.SSEvent("message", StreamResponse{Type: "error", Content: err.Error()})
+		c.Writer.Flush()
+		return
+	}
+
+	// 发送工具调用信息
+	if len(result.ToolCalls) > 0 {
+		c.SSEvent("message", map[string]interface{}{
+			"type":       "tool_calls",
+			"tool_calls": result.ToolCalls,
+		})
+		c.Writer.Flush()
+	}
+
+	// 发送完成事件
+	c.SSEvent("message", StreamResponse{
+		Type:    "done",
+		Content: result.Response,
+	})
+	c.Writer.Flush()
+}
+
+// streamWithoutFunctionCalling 不使用 Function Calling 的流式响应
+func (h *AgentHandler) streamWithoutFunctionCalling(c *gin.Context, session *models.AgentSession, cfg ModelConfig, content string) {
+	// 保存用户消息
+	_, err := h.store.AddMessage(session.ID, "user", content)
+	if err != nil {
+		c.SSEvent("message", StreamResponse{Type: "error", Content: "Failed to save message"})
+		c.Writer.Flush()
+		return
+	}
+
+	// 获取历史消息
+	messages, err := h.store.GetMessages(session.ID, 50)
+	if err != nil {
+		c.SSEvent("message", StreamResponse{Type: "error", Content: "Failed to get history"})
+		c.Writer.Flush()
+		return
+	}
+
+	// 调用模型
+	router := NewModelRouter()
+	fullResponse, err := h.streamChat(c, router, session.Model, messages, session.SystemPrompt)
+	if err != nil {
+		c.SSEvent("message", StreamResponse{Type: "error", Content: err.Error()})
+		c.Writer.Flush()
+		return
+	}
+
+	// 保存助手消息
+	_, err = h.store.AddMessage(session.ID, "assistant", fullResponse)
+	if err != nil {
+		c.SSEvent("message", StreamResponse{Type: "error", Content: "Failed to save response"})
+		c.Writer.Flush()
+		return
+	}
+
+	// 发送完成事件
+	c.SSEvent("message", StreamResponse{Type: "done", Content: fullResponse})
+	c.Writer.Flush()
+}
+
+// mockStreamResponseWithTools 模拟带工具的流式响应
+func (h *AgentHandler) mockStreamResponseWithTools(c *gin.Context, model string, content string) {
+	mockResponse := fmt.Sprintf("This is a simulated AI response from model '%s'. To enable real AI responses with Function Calling, configure the appropriate API keys:\n\n"+
+		"- OPENAI_API_KEY for OpenAI models\n"+
+		"- ANTHROPIC_API_KEY for Claude models\n"+
+		"- GLM_API_KEY for GLM models\n\n"+
+		"Your message: %s\n\nFunction Calling support is ready.", model, content)
+
+	// 逐字符发送
+	for _, char := range mockResponse {
+		select {
+		case <-c.Done():
+			return
+		default:
+		}
+
+		c.SSEvent("message", StreamResponse{Type: "token", Content: string(char)})
+		c.Writer.Flush()
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	c.SSEvent("message", StreamResponse{Type: "done", Content: mockResponse})
+	c.Writer.Flush()
+}
+
+// GetAgentToolExecutions 获取会话的工具执行记录
+func (h *AgentHandler) GetAgentToolExecutions(c *gin.Context) {
+	sessionID := c.Param("id")
+
+	executions, err := h.toolExecStore.ListByConversation(sessionID)
+	if err != nil {
+		failWithError(c, errors.WrapInternal("Failed to get tool executions", err))
+		return
+	}
+
+	success(c, executions)
+}
+
+// GetToolExecution 获取单个工具执行记录
+func (h *AgentHandler) GetToolExecution(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		failWithError(c, errors.InvalidRequest("Invalid execution ID"))
+		return
+	}
+
+	execution, err := h.toolExecStore.Get(uint(id))
+	if err != nil {
+		failWithError(c, errors.WrapInternal("Failed to get tool execution", err))
+		return
+	}
+
+	success(c, execution)
+}
+
+// GetAvailableTools 获取可用工具列表
+func (h *AgentHandler) GetAvailableTools(c *gin.Context) {
+	tools := h.registry.List()
+
+	// 转换为 OpenAI 格式
+	result := make([]map[string]interface{}, len(tools))
+	for i, tool := range tools {
+		result[i] = tool.ToOpenAITool()
+	}
+
+	success(c, result)
+}
+
+// GetToolDefinition 获取工具定义
+func (h *AgentHandler) GetToolDefinition(c *gin.Context) {
+	name := c.Param("name")
+
+	tool, err := h.registry.Get(name)
+	if err != nil {
+		failWithError(c, errors.WrapInternal("Tool not found", err))
+		return
+	}
+
+	success(c, tool)
 }
