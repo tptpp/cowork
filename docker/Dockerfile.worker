@@ -1,0 +1,44 @@
+# Dockerfile.worker - Cowork Worker
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# 复制依赖文件
+COPY go.mod go.sum ./
+RUN go mod download
+
+# 复制源码
+COPY . .
+
+# 构建二进制
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o worker ./cmd/worker
+
+# 运行阶段
+FROM alpine:3.19
+
+# 安装运行时依赖
+RUN apk add --no-cache ca-certificates git bash curl
+
+# 安装常用开发工具
+RUN apk add --no-cache nodejs npm python3 py3-pip || true
+
+WORKDIR /app
+
+# 复制二进制
+COPY --from=builder /app/worker .
+
+# 创建工作目录
+RUN mkdir -p /tmp/cowork
+
+# 环境变量默认值
+ENV GATEWAY_URL=http://gateway:8080
+ENV WORKER_NAME=worker-docker
+ENV WORKER_TAGS=dev,coding
+ENV WORKER_MODEL=default
+
+# 健康检查（通过心跳状态）
+HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
+    CMD pgrep worker || exit 1
+
+# 启动命令
+CMD ["./worker", "--gateway=${GATEWAY_URL}", "--name=${WORKER_NAME}", "--tags=${WORKER_TAGS}", "--model=${WORKER_MODEL}"]

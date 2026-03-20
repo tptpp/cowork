@@ -1,0 +1,108 @@
+# Cowork Docker Compose
+# Usage: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # Gateway 服务
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gateway
+    image: cowork-gateway:latest
+    container_name: cowork-gateway
+    ports:
+      - "8080:8080"
+    volumes:
+      - cowork-data:/app/data
+      - cowork-workdir:/tmp/cowork
+    environment:
+      - COWORK_DB_PATH=/app/data/cowork.db
+      - COWORK_ADDR=:8080
+      - COWORK_CORS_ORIGINS=*
+      # Agent 模型配置（取消注释以启用）
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # - GLM_API_KEY=${GLM_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cowork-network
+
+  # 开发 Worker
+  worker-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    image: cowork-worker:latest
+    container_name: cowork-worker-dev
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      - GATEWAY_URL=http://gateway:8080
+      - WORKER_NAME=worker-dev
+      - WORKER_TAGS=dev,coding,debug
+      - WORKER_MODEL=default
+    volumes:
+      - cowork-workdir:/tmp/cowork
+      # 挂载 Docker socket（可选，用于 Docker 命令）
+      # - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - cowork-network
+
+  # 测试 Worker（可选）
+  worker-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    image: cowork-worker:latest
+    container_name: cowork-worker-test
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      - GATEWAY_URL=http://gateway:8080
+      - WORKER_NAME=worker-test
+      - WORKER_TAGS=test,qa
+      - WORKER_MODEL=default
+    volumes:
+      - cowork-workdir:/tmp/cowork
+    restart: unless-stopped
+    profiles:
+      - full  # 使用 --profile full 启动
+    networks:
+      - cowork-network
+
+  # 前端（可选，用于生产部署）
+  frontend:
+    image: nginx:alpine
+    container_name: cowork-frontend
+    ports:
+      - "3000:80"
+    volumes:
+      - ../web/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - gateway
+    restart: unless-stopped
+    profiles:
+      - prod  # 使用 --profile prod 启动
+    networks:
+      - cowork-network
+
+networks:
+  cowork-network:
+    driver: bridge
+
+volumes:
+  cowork-data:
+    name: cowork-data
+  cowork-workdir:
+    name: cowork-workdir
