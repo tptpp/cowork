@@ -862,3 +862,48 @@ func (s *taskDependencyStore) GetGroupTasks(groupID string) ([]models.Task, erro
 	err := s.db.Where("group_id = ?", groupID).Order("created_at ASC").Find(&tasks).Error
 	return tasks, err
 }
+
+// TaskFileStore 任务文件存储接口
+type TaskFileStore interface {
+	Create(file *models.TaskFile) error
+	Get(id uint) (*models.TaskFile, error)
+	ListByTask(taskID string) ([]models.TaskFile, error)
+	Delete(id uint) error
+}
+
+// taskFileStore 任务文件存储实现
+type taskFileStore struct {
+	db *gorm.DB
+}
+
+// NewTaskFileStore 创建任务文件存储
+func NewTaskFileStore(db *gorm.DB) TaskFileStore {
+	return &taskFileStore{db: db}
+}
+
+// Create 创建文件记录
+func (s *taskFileStore) Create(file *models.TaskFile) error {
+	return s.db.Create(file).Error
+}
+
+// Get 获取文件记录
+func (s *taskFileStore) Get(id uint) (*models.TaskFile, error) {
+	var file models.TaskFile
+	err := s.db.First(&file, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
+// ListByTask 获取任务的所有文件
+func (s *taskFileStore) ListByTask(taskID string) ([]models.TaskFile, error) {
+	var files []models.TaskFile
+	err := s.db.Where("task_id = ?", taskID).Order("created_at DESC").Find(&files).Error
+	return files, err
+}
+
+// Delete 删除文件记录
+func (s *taskFileStore) Delete(id uint) error {
+	return s.db.Delete(&models.TaskFile{}, id).Error
+}

@@ -10,19 +10,23 @@ import {
   Sparkles,
   Wrench,
   AlertCircle,
+  Paperclip,
+  X,
+  FileIcon,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { useAgentStore } from '@/stores/agentStore'
+import { useFileStore, formatFileSize } from '@/stores/fileStore'
 import { cn } from '@/lib/utils'
 import {
   ToolCallsList,
   PendingToolsBadge,
 } from '@/components/agent/ToolCallDisplay'
 import { ToolApprovalModal } from '@/components/agent/ToolApprovalModal'
-import type { ToolCall, ToolExecution } from '@/types'
+import type { ToolCall, ToolExecution, UploadedFile } from '@/types'
 
 const MODEL_OPTIONS = [
   { value: 'default', label: 'Default (Auto)' },
@@ -141,6 +145,8 @@ export function AgentChatWidget() {
   const [selectedModel, setSelectedModel] = useState('default')
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [currentApprovalToolCall, setCurrentApprovalToolCall] = useState<ToolCall | null>(null)
+  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -163,6 +169,8 @@ export function AgentChatWidget() {
     clearToolState,
     error,
   } = useAgentStore()
+
+  const { uploadAgentFile, uploadingFiles } = useFileStore()
 
   // Fetch sessions and tools on mount
   useEffect(() => {
@@ -188,8 +196,28 @@ export function AgentChatWidget() {
     if (!input.trim() || isStreaming) return
     const content = input.trim()
     setInput('')
+    // Include attached files in the message
+    const fileIds = attachedFiles.map((f) => f.id)
+    setAttachedFiles([])
     await sendMessageWithTools(content)
   }
+
+  const handleFileSelect = async (files: File[]) => {
+    if (!currentSession) return
+
+    for (const file of files) {
+      const uploadedFile = await uploadAgentFile(currentSession.id, file)
+      if (uploadedFile) {
+        setAttachedFiles((prev) => [...prev, uploadedFile])
+      }
+    }
+  }
+
+  const handleRemoveAttachedFile = (fileId: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId))
+  }
+
+  const isUploading = uploadingFiles.size > 0
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -200,12 +228,14 @@ export function AgentChatWidget() {
 
   const handleNewSession = async () => {
     clearToolState()
+    setAttachedFiles([])
     await createSession(selectedModel)
   }
 
   const handleModelChange = async (newModel: string) => {
     setSelectedModel(newModel)
     clearToolState()
+    setAttachedFiles([])
     await createSession(newModel)
   }
 
@@ -383,33 +413,90 @@ export function AgentChatWidget() {
         </div>
 
         {/* Input Area */}
-        <div className="flex-shrink-0 flex gap-2">
-          <div className="relative flex-1">
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                currentSession
-                  ? 'Type your message...'
-                  : 'Create a session to start chatting'
-              }
-              disabled={!currentSession || isStreaming}
-              className="flex-1 pr-10 h-10 bg-background"
+        <div className="flex-shrink-0 space-y-2">
+          {/* Attached files */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {attachedFiles.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex items-center gap-1.5 px-2 py-1 bg-primary/10 text-primary rounded-md text-xs"
+                >
+                  <FileIcon className="w-3 h-3" />
+                  <span className="max-w-[100px] truncate">{file.filename}</span>
+                  <span className="text-primary/60">
+                    ({formatFileSize(file.size)})
+                  </span>
+                  <button
+                    onClick={() => handleRemoveAttachedFile(file.id)}
+                    className="hover:bg-primary/20 rounded-sm p-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files || [])
+                if (files.length > 0) {
+                  handleFileSelect(files)
+                }
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = ''
+                }
+              }}
+              className="hidden"
+              disabled={!currentSession || isStreaming || isUploading}
             />
+            <div className="relative flex-1">
+              <Input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  currentSession
+                    ? 'Type your message...'
+                    : 'Create a session to start chatting'
+                }
+                disabled={!currentSession || isStreaming}
+                className="flex-1 pr-10 h-10 bg-background"
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!currentSession || isStreaming || isUploading}
+              title="Attach file"
+              className="h-10 w-10"
+            >
+              {isUploading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Paperclip className="w-4 h-4" />
+              )}
+            </Button>
+            <Button
+              onClick={handleSend}
+              disabled={!input.trim() || !currentSession || isStreaming}
+              size="icon"
+              className="h-10 w-10 shadow-lg shadow-primary/20"
+            >
+              {isStreaming ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </Button>
           </div>
-          <Button
-            onClick={handleSend}
-            disabled={!input.trim() || !currentSession || isStreaming}
-            size="icon"
-            className="h-10 w-10 shadow-lg shadow-primary/20"
-          >
-            {isStreaming ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-          </Button>
         </div>
       </CardContent>
 

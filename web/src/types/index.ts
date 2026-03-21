@@ -207,3 +207,22 @@ export interface Notification {
   read: boolean
   created_at: string
 }
+
+// File types
+export interface TaskFile {
+  id: number
+  task_id: string
+  name: string
+  path: string
+  size: number
+  mime_type: string
+  created_at: string
+}
+
+export interface UploadedFile {
+  id: string
+  filename: string
+  size: number
+  mime_type: string
+  url: string
+}

@@ -27,6 +27,7 @@ type Handler struct {
 	toolExecStore    store.ToolExecutionStore
 	agentHandler     *AgentHandler
 	toolHandler      *ToolHandler
+	fileHandler      *FileHandler
 	hub              *ws.Hub
 	scheduler        *scheduler.Scheduler
 	startTime        time.Time
@@ -41,6 +42,7 @@ func NewHandler(
 	userLayoutStore store.UserLayoutStore,
 	agentStore store.AgentSessionStore,
 	toolExecStore store.ToolExecutionStore,
+	fileStore store.TaskFileStore,
 	hub *ws.Hub,
 	sched *scheduler.Scheduler,
 	toolRegistry *tools.Registry,
@@ -55,6 +57,7 @@ func NewHandler(
 		toolExecStore:    toolExecStore,
 		agentHandler:     NewAgentHandler(agentStore, toolExecStore, taskStore, toolRegistry),
 		toolHandler:      NewToolHandler(toolRegistry),
+		fileHandler:      NewFileHandler(fileStore, taskStore, agentStore, FileHandlerConfig{}),
 		hub:              hub,
 		scheduler:        sched,
 		startTime:        time.Now(),
@@ -894,4 +897,36 @@ func (h *Handler) EnableTool(c *gin.Context) {
 // DisableTool 禁用工具
 func (h *Handler) DisableTool(c *gin.Context) {
 	h.toolHandler.DisableTool(c)
+}
+
+// File API - 委托给 FileHandler
+
+// UploadFile 上传文件
+func (h *Handler) UploadFile(c *gin.Context) {
+	h.fileHandler.UploadFile(c)
+}
+
+// UploadTaskFile 上传任务文件
+func (h *Handler) UploadTaskFile(c *gin.Context) {
+	h.fileHandler.UploadTaskFile(c)
+}
+
+// UploadAgentFile 上传 Agent 会话文件
+func (h *Handler) UploadAgentFile(c *gin.Context) {
+	h.fileHandler.UploadAgentFile(c)
+}
+
+// GetTaskFiles 获取任务文件列表
+func (h *Handler) GetTaskFiles(c *gin.Context) {
+	h.fileHandler.GetTaskFiles(c)
+}
+
+// DownloadFile 下载文件
+func (h *Handler) DownloadFile(c *gin.Context) {
+	h.fileHandler.DownloadFile(c)
+}
+
+// DeleteFile 删除文件
+func (h *Handler) DeleteFile(c *gin.Context) {
+	h.fileHandler.DeleteFile(c)
 }

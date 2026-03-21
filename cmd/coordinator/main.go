@@ -72,6 +72,7 @@ func main() {
 		store.NewUserLayoutStore(s.DB()),
 		store.NewAgentSessionStore(s.DB()),
 		store.NewToolExecutionStore(s.DB()),
+		store.NewTaskFileStore(s.DB()),
 		hub,
 		taskScheduler,
 		toolRegistry,
@@ -138,6 +139,8 @@ func main() {
 		api.POST("/tasks/:id/logs", h.CreateTaskLog)
 		api.DELETE("/tasks/:id", h.CancelTask) // 统一使用 DELETE 方法取消任务
 		api.GET("/tasks/:id/logs", h.GetTaskLogs)
+		api.GET("/tasks/:id/files", h.GetTaskFiles)       // 任务文件列表
+		api.POST("/tasks/:id/files", h.UploadTaskFile)    // 上传任务文件
 
 		// Worker API
 		api.GET("/workers", h.GetWorkers)
@@ -163,6 +166,7 @@ func main() {
 		api.POST("/agent/sessions/:id/tools/execute", h.ExecuteToolCall)
 		api.GET("/agent/tools", h.GetAvailableTools)
 		api.GET("/agent/tools/:name", h.GetToolDefinition)
+		api.POST("/agent/sessions/:id/files", h.UploadAgentFile) // Agent 会话文件上传
 
 		// Tool API
 		api.GET("/tools", h.GetTools)
@@ -177,6 +181,11 @@ func main() {
 		api.GET("/notifications", h.GetNotifications)
 		api.PUT("/notifications/read", h.MarkNotificationsRead)
 		api.PUT("/notifications/read-all", h.MarkAllNotificationsRead)
+
+		// File API
+		api.POST("/files/upload", h.UploadFile)
+		api.GET("/files/:id", h.DownloadFile)
+		api.DELETE("/files/:id", h.DeleteFile)
 	}
 
 	// 启动 HTTP 服务器
