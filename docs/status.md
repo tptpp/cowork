@@ -113,7 +113,10 @@
 
 ### 已知限制
 
-1. **Docker 部署**: Docker 配置文件已就绪，但需要手动构建和部署
+1. **Docker 部署**: Docker 配置文件已就绪，提供一键部署脚本
+   - 安装 Docker: `sudo ./scripts/install-docker.sh`
+   - 构建镜像: `./scripts/deploy.sh --build`
+   - 启动服务: `./scripts/deploy.sh --dev`
 
 2. **用户系统未实现**:
    - 无用户认证 UI
