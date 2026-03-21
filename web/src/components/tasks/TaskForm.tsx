@@ -36,14 +36,6 @@ const commonTags = [
   'database', 'api', 'frontend', 'backend', 'testing',
 ]
 
-const commonModels = [
-  { value: '', label: 'Any (No preference)' },
-  { value: 'claude-3-opus', label: 'Claude 3 Opus' },
-  { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' },
-  { value: 'gpt-4', label: 'GPT-4' },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-]
-
 export function TaskForm({ onSuccess, onCancel, showCard = true }: TaskFormProps) {
   const { createTask } = useTaskStore()
   const [loading, setLoading] = useState(false)
@@ -51,7 +43,6 @@ export function TaskForm({ onSuccess, onCancel, showCard = true }: TaskFormProps
     type: 'code_generation',
     description: '',
     priority: 'medium' as Priority,
-    preferred_model: '',
   })
   const [tags, setTags] = useState<string[]>([])
   const [newTag, setNewTag] = useState('')
@@ -68,7 +59,6 @@ export function TaskForm({ onSuccess, onCancel, showCard = true }: TaskFormProps
         description: formData.description,
         priority: formData.priority,
         required_tags: tags,
-        preferred_model: formData.preferred_model,
         input: {},
       })
 
@@ -78,7 +68,6 @@ export function TaskForm({ onSuccess, onCancel, showCard = true }: TaskFormProps
           type: 'code_generation',
           description: '',
           priority: 'medium',
-          preferred_model: '',
         })
         setTags([])
         onSuccess?.(task)
@@ -187,16 +176,6 @@ export function TaskForm({ onSuccess, onCancel, showCard = true }: TaskFormProps
             </button>
           ))}
         </div>
-      </div>
-
-      {/* Preferred Model */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Preferred Model</label>
-        <Select
-          options={commonModels}
-          value={formData.preferred_model}
-          onChange={(e) => setFormData({ ...formData, preferred_model: e.target.value })}
-        />
       </div>
 
       {/* Error */}

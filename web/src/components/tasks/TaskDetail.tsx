@@ -266,13 +266,6 @@ export function TaskDetail({ taskId, onBack }: TaskDetailProps) {
                 </div>
               )}
 
-              {currentTask.preferred_model && (
-                <div>
-                  <label className="text-sm text-muted-foreground">Preferred Model</label>
-                  <p className="mt-1">{currentTask.preferred_model}</p>
-                </div>
-              )}
-
               {currentTask.worker_id && (
                 <div>
                   <label className="text-sm text-muted-foreground">Worker ID</label>

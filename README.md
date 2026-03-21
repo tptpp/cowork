@@ -26,7 +26,7 @@
 ### 核心能力
 
 - **多任务并行**：多个 Worker 同时处理不同任务
-- **灵活调度**：基于标签的任务分发，支持模型偏好
+- **灵活调度**：基于标签的任务分发
 - **实时监控**：WebSocket 推送任务状态、进度
 - **可扩展布局**：拖拽式 Dashboard，Widget 自定义
 - **多模型支持**：OpenAI/Anthropic/GLM 等 AI 模型路由
@@ -122,7 +122,7 @@ cowork/
 go run ./cmd/coordinator
 
 # 启动 Worker（另一个终端）
-go run ./cmd/worker --name=worker-1 --tags=dev,coding --model=gpt-4
+go run ./cmd/worker --name=worker-1 --tags=dev,coding
 
 # 启动前端
 cd web && npm run dev

@@ -127,14 +127,14 @@
 
 1. 用户通过 Frontend 提交任务
    POST /api/tasks
-   { "type": "development", "description": "...", "preferred_model": "gpt-4" }
+   { "type": "development", "description": "..." }
 
 2. Gateway 创建任务，状态为 pending
    Task { id: "task-101", status: "pending", ... }
 
 3. Scheduler 定期检查待分配任务
    - 查找所有 pending 状态的任务
-   - 查找匹配标签和模型偏好的空闲 Worker
+   - 查找匹配标签的空闲 Worker
    - 分配任务，状态变为 running
 
 4. Worker 收到任务，开始执行

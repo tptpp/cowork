@@ -20,7 +20,7 @@ cd ~/projects/cowork
 go run ./cmd/coordinator
 
 # 启动 Worker（另一个终端）
-go run ./cmd/worker --name=worker-1 --tags=dev --model=gpt-4
+go run ./cmd/worker --name=worker-1 --tags=dev
 
 # 启动前端（另一个终端）
 cd web
@@ -152,7 +152,6 @@ services:
       - COORDINATOR_URL=http://coordinator:8080
       - WORKER_NAME=worker-dev
       - WORKER_TAGS=dev,coding
-      - WORKER_MODEL=gpt-4
     volumes:
       - cowork-workdir:/tmp/cowork
     restart: unless-stopped
@@ -167,7 +166,6 @@ services:
       - COORDINATOR_URL=http://coordinator:8080
       - WORKER_NAME=worker-test
       - WORKER_TAGS=test,qa
-      - WORKER_MODEL=claude-3
     volumes:
       - cowork-workdir:/tmp/cowork
     restart: unless-stopped

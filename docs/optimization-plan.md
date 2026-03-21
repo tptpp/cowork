@@ -193,13 +193,13 @@ func TestScheduler_SelectWorker(t *testing.T) {
         want     *models.Worker
     }{
         {
-            name: "select by model preference",
-            task: models.Task{PreferredModel: "gpt-4"},
+            name: "select by required tags",
+            task: models.Task{RequiredTags: []string{"gpu"}},
             workers: []models.Worker{
-                {ID: "w1", Model: "claude-3"},
-                {ID: "w2", Model: "gpt-4"},
+                {ID: "w1", Tags: []string{"cpu"}},
+                {ID: "w2", Tags: []string{"gpu"}},
             },
-            want: &models.Worker{ID: "w2", Model: "gpt-4"},
+            want: &models.Worker{ID: "w2", Tags: []string{"gpu"}},
         },
         // ...
     }

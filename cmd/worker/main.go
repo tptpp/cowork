@@ -9,13 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/tp/cowork/internal/shared/config"
 	"github.com/tp/cowork/internal/shared/logger"
 	"github.com/tp/cowork/internal/shared/models"
 	"github.com/tp/cowork/internal/worker/executor"
@@ -25,7 +25,6 @@ import (
 type WorkerConfig struct {
 	Name           string
 	Tags           []string
-	Model          string
 	CoordinatorURL string
 	MaxConcurrent  int
 	WorkDir        string
@@ -88,11 +87,10 @@ type TaskLogRequest struct {
 }
 
 // Register 注册 Worker
-func (c *CoordinatorClient) Register(name string, tags []string, model string, maxConcurrent int) (*RegisterResponse, error) {
+func (c *CoordinatorClient) Register(name string, tags []string, maxConcurrent int) (*RegisterResponse, error) {
 	payload := map[string]interface{}{
 		"name":           name,
 		"tags":           tags,
-		"model":          model,
 		"max_concurrent": maxConcurrent,
 	}
 
@@ -270,6 +268,9 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 	execConfig := executor.DefaultConfig()
 	if cfg.WorkDir != "" {
 		execConfig.BaseWorkDir = cfg.WorkDir
+	} else {
+		// 使用 ~/.cowork/workers/{name}/workspace 作为工作目录
+		execConfig.BaseWorkDir = config.GetWorkerWorkspaceDir(cfg.Name)
 	}
 
 	worker := &Worker{
@@ -294,6 +295,9 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 		}
 		if cfg.WorkDir != "" {
 			dockerConfig.WorkDirBase = cfg.WorkDir
+		} else {
+			// 使用 ~/.cowork/workers/{name}/workspace 作为 Docker 工作目录
+			dockerConfig.WorkDirBase = config.GetWorkerWorkspaceDir(cfg.Name)
 		}
 
 		dockerExec, err := executor.NewDockerExecutor(dockerConfig)
@@ -312,7 +316,7 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 // Start 启动 Worker
 func (w *Worker) Start() error {
 	// 注册到 Coordinator
-	resp, err := w.client.Register(w.config.Name, w.config.Tags, w.config.Model, w.config.MaxConcurrent)
+	resp, err := w.client.Register(w.config.Name, w.config.Tags, w.config.MaxConcurrent)
 	if err != nil {
 		return fmt.Errorf("failed to register: %w", err)
 	}
@@ -322,10 +326,10 @@ func (w *Worker) Start() error {
 	log.Info().Str("id", w.id).Str("name", w.config.Name).Msg("Worker registered")
 
 	// 确保工作目录存在
-	// 默认使用 /tmp/cowork-worker/{worker-id}，避免与协调者二进制文件（可能在 /tmp/cowork）冲突
+	// 默认使用 ~/.cowork/workers/{worker-name}/workspace，持久化且避免与其他进程冲突
 	workDir := w.config.WorkDir
 	if workDir == "" {
-		workDir = filepath.Join(os.TempDir(), "cowork-worker", w.id)
+		workDir = config.GetWorkerWorkspaceDir(w.config.Name)
 	}
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return fmt.Errorf("failed to create work directory: %w", err)
@@ -602,7 +606,6 @@ func main() {
 	// 命令行参数
 	name := flag.String("name", "", "Worker name (required)")
 	tagsStr := flag.String("tags", "", "Worker tags (comma-separated)")
-	model := flag.String("model", "", "Default model")
 	coordinator := flag.String("coordinator", "http://localhost:8080", "Coordinator URL")
 	maxConcurrent := flag.Int("max-concurrent", 1, "Maximum concurrent tasks")
 	workDir := flag.String("work-dir", "", "Base work directory")
@@ -628,7 +631,6 @@ func main() {
 	cfg := &WorkerConfig{
 		Name:           *name,
 		Tags:           tags,
-		Model:          *model,
 		CoordinatorURL: *coordinator,
 		MaxConcurrent:  *maxConcurrent,
 		WorkDir:        *workDir,
@@ -643,7 +645,7 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to start worker")
 	}
 
-	log.Info().Str("name", cfg.Name).Strs("tags", cfg.Tags).Str("model", cfg.Model).Msg("Worker started")
+	log.Info().Str("name", cfg.Name).Strs("tags", cfg.Tags).Msg("Worker started")
 
 	// 等待中断信号
 	sigCh := make(chan os.Signal, 1)

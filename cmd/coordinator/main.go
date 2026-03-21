@@ -2,21 +2,24 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
 	"github.com/tp/cowork/internal/coordinator/handler"
 	"github.com/tp/cowork/internal/coordinator/middleware"
 	"github.com/tp/cowork/internal/coordinator/scheduler"
 	"github.com/tp/cowork/internal/coordinator/store"
 	"github.com/tp/cowork/internal/coordinator/tools"
 	"github.com/tp/cowork/internal/coordinator/ws"
+	"github.com/tp/cowork/internal/shared/config"
+	"github.com/tp/cowork/internal/shared/logger"
 )
 
 var upgrader = websocket.Upgrader{
@@ -28,19 +31,40 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
+	// 初始化日志
+	logLevel := os.Getenv("COWORK_LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	logFormat := os.Getenv("COWORK_LOG_FORMAT")
+	if logFormat == "" {
+		logFormat = "text"
+	}
+	logger.Configure(logger.Config{
+		Level:  logLevel,
+		Format: logFormat,
+	})
+
 	// 初始化数据库
 	dbPath := os.Getenv("COWORK_DB_PATH")
 	if dbPath == "" {
-		dbPath = "./cowork.db"
+		// 使用 ~/.cowork/coordinator/cowork.db 作为默认数据库路径
+		dbPath = config.GetCoordinatorDBPath()
+	}
+
+	// 确保数据库目录存在
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Fatal().Msgf("Failed to create database directory: %v", err)
 	}
 
 	s, err := store.New(store.Config{Path: dbPath})
 	if err != nil {
-		log.Fatalf("Failed to initialize store: %v", err)
+		log.Fatal().Msgf("Failed to initialize store: %v", err)
 	}
 	defer s.Close()
 
-	log.Printf("Database initialized: %s", dbPath)
+	log.Info().Msgf("Database initialized: %s", dbPath)
 
 	// 初始化 WebSocket Hub
 	hub := ws.NewHub()
@@ -59,9 +83,9 @@ func main() {
 	// 初始化工具注册中心
 	toolRegistry := tools.NewRegistry(store.NewToolDefinitionStore(s.DB()))
 	if err := toolRegistry.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize tool registry: %v", err)
+		log.Fatal().Msgf("Failed to initialize tool registry: %v", err)
 	}
-	log.Printf("Tool registry initialized with %d builtin tools", len(toolRegistry.GetBuiltinTools()))
+	log.Info().Msgf("Tool registry initialized with %d builtin tools", len(toolRegistry.GetBuiltinTools()))
 
 	// 初始化处理器
 	h := handler.NewHandler(
@@ -89,7 +113,7 @@ func main() {
 
 	corsConfig := middleware.DefaultCORSConfig()
 	corsConfig.AllowedOrigins = middleware.ParseOrigins(corsOrigins)
-	log.Printf("CORS allowed origins: %v", corsConfig.AllowedOrigins)
+	log.Info().Msgf("CORS allowed origins: %v", corsConfig.AllowedOrigins)
 
 	// CORS 中间件
 	r.Use(middleware.CORS(corsConfig))
@@ -97,10 +121,10 @@ func main() {
 	// API 认证配置
 	authConfig := middleware.DefaultAuthConfig()
 	if len(authConfig.APIKeys) > 0 {
-		log.Printf("API Key authentication enabled with %d keys", len(authConfig.APIKeys))
+		log.Info().Msgf("API Key authentication enabled with %d keys", len(authConfig.APIKeys))
 	}
 	if authConfig.JWTSecret != "" {
-		log.Println("JWT authentication enabled")
+		log.Info().Msg("JWT authentication enabled")
 	}
 
 	// 健康检查（无需认证）
@@ -112,7 +136,7 @@ func main() {
 	r.GET("/ws", func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
-			log.Printf("WebSocket upgrade error: %v", err)
+			log.Warn().Msgf("WebSocket upgrade error: %v", err)
 			return
 		}
 
@@ -201,9 +225,9 @@ func main() {
 
 	// 优雅关闭
 	go func() {
-		log.Printf("Coordinator starting on %s", addr)
+		log.Info().Msgf("Coordinator starting on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			log.Fatal().Msgf("Failed to start server: %v", err)
 		}
 	}()
 
@@ -212,14 +236,14 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down Coordinator...")
+	log.Info().Msg("Shutting down Coordinator...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		log.Warn().Msgf("Server shutdown error: %v", err)
 	}
 
-	log.Println("Coordinator stopped")
+	log.Info().Msg("Coordinator stopped")
 }

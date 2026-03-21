@@ -68,7 +68,6 @@ Content-Type: application/json
   "description": "实现用户登录API", // 任务描述
   "priority": "high",              // 可选：low, medium, high (默认 medium)
   "required_tags": ["dev", "coding"], // 可选：需要的 Worker 标签
-  "preferred_model": "gpt-4",      // 可选：偏好模型
   "input": {                       // 任务输入数据
     "repo_url": "https://github.com/...",
     "branch": "main"
@@ -155,7 +154,6 @@ GET /api/tasks/:id
     "priority": "high",
     "worker_id": "worker-1",
     "required_tags": ["dev", "coding"],
-    "preferred_model": "gpt-4",
     "input": {
       "repo_url": "https://github.com/...",
       "branch": "main"

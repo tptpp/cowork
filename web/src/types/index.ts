@@ -11,7 +11,6 @@ export interface Task {
   priority: Priority
   worker_id: string | null
   required_tags: string[]
-  preferred_model: string
   input: Record<string, unknown>
   output: Record<string, unknown>
   error: string | null
@@ -34,7 +33,6 @@ export interface Worker {
   id: string
   name: string
   tags: string[]
-  model: string
   status: WorkerStatus
   max_concurrent: number
   capabilities: Record<string, unknown>

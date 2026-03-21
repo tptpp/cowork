@@ -44,7 +44,6 @@ type Task struct {
     
     // 标签匹配
     RequiredTags pq.StringArray `gorm:"type:text[]" json:"required_tags"`
-    PreferredModel string       `gorm:"type:varchar(50)" json:"preferred_model"`
     
     // 输入输出
     Input       JSON       `gorm:"type:jsonb" json:"input"`
@@ -116,7 +115,6 @@ CREATE TABLE tasks (
     priority VARCHAR(10) DEFAULT 'medium',
     worker_id VARCHAR(64),
     required_tags TEXT,        -- JSON array
-    preferred_model VARCHAR(50),
     input TEXT,                -- JSON
     output TEXT,               -- JSON
     error TEXT,

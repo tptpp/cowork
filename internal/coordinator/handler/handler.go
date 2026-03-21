@@ -218,13 +218,12 @@ func (h *Handler) GetSystemStats(c *gin.Context) {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	Type            string              `json:"type" binding:"required"`
-	Description     string              `json:"description"`
-	Priority        models.Priority     `json:"priority"`
-	RequiredTags    []string            `json:"required_tags"`
-	PreferredModel  string              `json:"preferred_model"`
-	Input           models.JSON         `json:"input"`
-	Config          models.JSON         `json:"config"`
+	Type          string              `json:"type" binding:"required"`
+	Description   string              `json:"description"`
+	Priority      models.Priority     `json:"priority"`
+	RequiredTags  []string            `json:"required_tags"`
+	Input         models.JSON         `json:"input"`
+	Config        models.JSON         `json:"config"`
 }
 
 // CreateTask 创建任务
@@ -242,15 +241,14 @@ func (h *Handler) CreateTask(c *gin.Context) {
 	}
 
 	task := &models.Task{
-		ID:             uuid.New().String(),
-		Type:           req.Type,
-		Description:    req.Description,
-		Status:         models.TaskStatusPending,
-		Priority:       priority,
-		RequiredTags:   req.RequiredTags,
-		PreferredModel: req.PreferredModel,
-		Input:          req.Input,
-		Config:         req.Config,
+		ID:           uuid.New().String(),
+		Type:         req.Type,
+		Description:  req.Description,
+		Status:       models.TaskStatusPending,
+		Priority:     priority,
+		RequiredTags: req.RequiredTags,
+		Input:        req.Input,
+		Config:       req.Config,
 	}
 
 	if err := h.taskStore.Create(task); err != nil {
@@ -370,12 +368,11 @@ func (h *Handler) GetTaskLogs(c *gin.Context) {
 
 // RegisterWorkerRequest 注册 Worker 请求
 type RegisterWorkerRequest struct {
-	Name           string        `json:"name" binding:"required"`
-	Tags           []string      `json:"tags" binding:"required"`
-	Model          string        `json:"model"`
-	MaxConcurrent  int           `json:"max_concurrent"`
-	Capabilities   models.JSON   `json:"capabilities"`
-	Metadata       models.JSON   `json:"metadata"`
+	Name          string       `json:"name" binding:"required"`
+	Tags          []string     `json:"tags" binding:"required"`
+	MaxConcurrent int          `json:"max_concurrent"`
+	Capabilities  models.JSON  `json:"capabilities"`
+	Metadata      models.JSON  `json:"metadata"`
 }
 
 // RegisterWorker 注册 Worker
@@ -410,7 +407,6 @@ func (h *Handler) RegisterWorker(c *gin.Context) {
 		ID:            uuid.New().String(),
 		Name:          req.Name,
 		Tags:          req.Tags,
-		Model:         req.Model,
 		Status:        models.WorkerStatusIdle,
 		MaxConcurrent: req.MaxConcurrent,
 		Capabilities:  req.Capabilities,

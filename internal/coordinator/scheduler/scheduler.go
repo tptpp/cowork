@@ -191,16 +191,7 @@ func (s *Scheduler) selectWorker(task models.Task, workers []models.Worker) *mod
 		return nil
 	}
 
-	// 2. 模型匹配（优先）
-	if task.PreferredModel != "" {
-		for _, worker := range candidates {
-			if worker.Model == task.PreferredModel {
-				return &worker
-			}
-		}
-	}
-
-	// 3. 负载均衡（选择负载最低的）
+	// 2. 负载均衡（选择负载最低的）
 	return s.selectLeastLoaded(candidates)
 }
 

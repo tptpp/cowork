@@ -110,8 +110,7 @@ export interface Task {
   
   worker_id: string | null;
   required_tags: string[];
-  preferred_model: string | null;
-  
+
   input: Record<string, unknown>;
   output: Record<string, unknown> | null;
   error: string | null;
@@ -154,7 +153,6 @@ export interface CreateTaskInput {
   description?: string;
   priority?: Priority;
   required_tags?: string[];
-  preferred_model?: string;
   input?: Record<string, unknown>;
   config?: TaskConfig;
 }

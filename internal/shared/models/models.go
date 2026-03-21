@@ -143,8 +143,7 @@ type Task struct {
 	Worker      *Worker    `gorm:"foreignKey:WorkerID" json:"worker,omitempty"`
 
 	// 标签匹配
-	RequiredTags   StringArray `gorm:"type:text" json:"required_tags"`
-	PreferredModel string      `gorm:"type:varchar(50)" json:"preferred_model"`
+	RequiredTags StringArray `gorm:"type:text" json:"required_tags"`
 
 	// 输入输出
 	Input  JSON    `gorm:"type:text" json:"input"`
@@ -234,7 +233,6 @@ type Worker struct {
 
 	// 能力标签
 	Tags  StringArray `gorm:"type:text" json:"tags"`
-	Model string      `gorm:"type:varchar(50)" json:"model"`
 
 	// 状态
 	Status WorkerStatus `gorm:"type:varchar(20);index" json:"status"`

@@ -104,7 +104,7 @@ export function WorkerStatusWidget({ onSelectWorker }: WorkerStatusWidgetProps) 
                     <span className="font-medium text-sm truncate">{worker.name}</span>
                     <Circle className={cn('w-2 h-2 fill-current', config.dot, config.color)} />
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">{worker.model}</p>
+                  <p className="text-xs text-muted-foreground truncate">{worker.tags.join(', ')}</p>
                 </div>
 
                 <div className="flex items-center gap-2">
