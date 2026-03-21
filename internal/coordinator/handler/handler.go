@@ -55,7 +55,7 @@ func NewHandler(
 		userLayoutStore:  userLayoutStore,
 		agentStore:       agentStore,
 		toolExecStore:    toolExecStore,
-		agentHandler:     NewAgentHandler(agentStore, toolExecStore, taskStore, toolRegistry),
+		agentHandler:     NewAgentHandler(agentStore, toolExecStore, taskStore, fileStore, toolRegistry),
 		toolHandler:      NewToolHandler(toolRegistry),
 		fileHandler:      NewFileHandler(fileStore, taskStore, agentStore, FileHandlerConfig{}),
 		hub:              hub,

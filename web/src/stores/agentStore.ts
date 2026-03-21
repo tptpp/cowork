@@ -67,6 +67,7 @@ interface AgentState {
   sendMessage: (content: string) => Promise<void>
   sendMessageWithTools: (
     content: string,
+    files?: string[],  // 文件 ID 列表
     tools?: string[],
     autoExecute?: boolean
   ) => Promise<void>
@@ -291,6 +292,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // Send a message with tool support (Function Calling)
   sendMessageWithTools: async (
     content: string,
+    files?: string[],  // 文件 ID 列表
     tools?: string[],
     autoExecute: boolean = true
   ) => {
@@ -326,6 +328,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             content,
+            files: files?.map(id => parseInt(id)), // Convert string IDs to numbers
             tools,
             auto_execute_tools: autoExecute,
           }),

@@ -23,11 +23,12 @@ import (
 
 // AgentHandler Agent API 处理器
 type AgentHandler struct {
-	store        store.AgentSessionStore
+	store         store.AgentSessionStore
 	toolExecStore store.ToolExecutionStore
-	taskStore    store.TaskStore
-	registry     *tools.Registry
-	coordinator  *agent.ConversationCoordinator
+	taskStore     store.TaskStore
+	fileStore     store.TaskFileStore
+	registry      *tools.Registry
+	coordinator   *agent.ConversationCoordinator
 }
 
 // NewAgentHandler 创建 Agent 处理器
@@ -35,12 +36,14 @@ func NewAgentHandler(
 	store store.AgentSessionStore,
 	toolExecStore store.ToolExecutionStore,
 	taskStore store.TaskStore,
+	fileStore store.TaskFileStore,
 	registry *tools.Registry,
 ) *AgentHandler {
 	return &AgentHandler{
 		store:         store,
 		toolExecStore: toolExecStore,
 		taskStore:     taskStore,
+		fileStore:     fileStore,
 		registry:      registry,
 	}
 }
@@ -619,6 +622,7 @@ func (h *AgentHandler) GetAgentMessages(c *gin.Context) {
 // SendAgentMessageWithToolsRequest 发送带工具支持的消息请求
 type SendAgentMessageWithToolsRequest struct {
 	Content          string   `json:"content" binding:"required"`
+	Files            []uint   `json:"files,omitempty"`             // 文件 ID 列表
 	Tools            []string `json:"tools,omitempty"`             // 指定可用工具
 	AutoExecuteTools bool     `json:"auto_execute_tools,omitempty"` // 是否自动执行工具
 }
@@ -640,6 +644,19 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 		return
 	}
 
+	// 处理文件上下文
+	content := req.Content
+	if len(req.Files) > 0 && h.fileStore != nil {
+		fileContext, err := h.buildFileContext(req.Files)
+		if err != nil {
+			failWithError(c, errors.WrapInternal("Failed to read file context", err))
+			return
+		}
+		if fileContext != "" {
+			content = fmt.Sprintf("%s\n\n[Attached Files]\n%s", req.Content, fileContext)
+		}
+	}
+
 	// 设置 SSE 响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -657,7 +674,7 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 
 	// 如果没有协调器，使用简单模式
 	if h.coordinator == nil {
-		h.streamWithoutFunctionCalling(c, session, cfg, req.Content)
+		h.streamWithoutFunctionCalling(c, session, cfg, content)
 		return
 	}
 
@@ -670,7 +687,7 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 	result, err := h.coordinator.ProcessMessage(
 		c.Request.Context(),
 		sessionID,
-		req.Content,
+		content,
 		agent.ModelConfig{
 			Type:    cfg.Type,
 			APIKey:  cfg.APIKey,
@@ -909,4 +926,35 @@ func (h *AgentHandler) ExecuteToolCall(c *gin.Context) {
 		"result":  mockResult,
 		"message": "Tool executed successfully (mock mode - no coordinator)",
 	})
+}
+
+// buildFileContext 构建文件上下文
+func (h *AgentHandler) buildFileContext(fileIDs []uint) (string, error) {
+	var contextBuilder strings.Builder
+
+	for _, fileID := range fileIDs {
+		file, err := h.fileStore.Get(fileID)
+		if err != nil {
+			continue // 跳过不存在的文件
+		}
+
+		// 读取文件内容
+		content, err := os.ReadFile(file.Path)
+		if err != nil {
+			continue // 跳过无法读取的文件
+		}
+
+		// 限制文件内容长度
+		maxContentLength := 10000 // 10KB per file
+		contentStr := string(content)
+		if len(contentStr) > maxContentLength {
+			contentStr = contentStr[:maxContentLength] + "\n... (truncated)"
+		}
+
+		contextBuilder.WriteString(fmt.Sprintf("=== %s ===\n", file.Name))
+		contextBuilder.WriteString(contentStr)
+		contextBuilder.WriteString("\n\n")
+	}
+
+	return contextBuilder.String(), nil
 }

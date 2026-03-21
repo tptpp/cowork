@@ -199,7 +199,7 @@ export function AgentChatWidget() {
     // Include attached files in the message
     const fileIds = attachedFiles.map((f) => f.id)
     setAttachedFiles([])
-    await sendMessageWithTools(content)
+    await sendMessageWithTools(content, fileIds)
   }
 
   const handleFileSelect = async (files: File[]) => {
