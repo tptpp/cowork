@@ -81,7 +81,8 @@ type Config struct {
 // DefaultConfig 默认配置
 func DefaultConfig() Config {
 	return Config{
-		BaseWorkDir:    "/tmp/cowork/work",
+		// 使用 /tmp/cowork-worker 作为基础路径，避免与协调者二进制文件（可能在 /tmp/cowork）冲突
+		BaseWorkDir:    "/tmp/cowork-worker",
 		MaxExecTime:    30 * time.Minute,
 		CleanupOnExit:  true,
 		EnableSandbox:  false,

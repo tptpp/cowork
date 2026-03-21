@@ -322,9 +322,10 @@ func (w *Worker) Start() error {
 	log.Info().Str("id", w.id).Str("name", w.config.Name).Msg("Worker registered")
 
 	// 确保工作目录存在
+	// 默认使用 /tmp/cowork-worker/{worker-id}，避免与协调者二进制文件（可能在 /tmp/cowork）冲突
 	workDir := w.config.WorkDir
 	if workDir == "" {
-		workDir = filepath.Join(os.TempDir(), "cowork", w.id)
+		workDir = filepath.Join(os.TempDir(), "cowork-worker", w.id)
 	}
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return fmt.Errorf("failed to create work directory: %w", err)

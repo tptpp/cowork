@@ -49,7 +49,8 @@ func DefaultDockerConfig() DockerConfig {
 		Timeout:         30 * time.Minute,
 		AutoRemove:      true,
 		WorkDir:         "/workspace",
-		WorkDirBase:     "/tmp/cowork",
+		// 使用 /tmp/cowork-worker 作为主机工作目录基础路径，避免与协调者二进制文件（可能在 /tmp/cowork）冲突
+		WorkDirBase:     "/tmp/cowork-worker",
 		PullPolicy:      "missing",
 	}
 }

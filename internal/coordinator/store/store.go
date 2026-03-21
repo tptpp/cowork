@@ -24,7 +24,7 @@ type Store struct {
 // New 创建新的数据库存储
 func New(cfg Config) (*Store, error) {
 	db, err := gorm.Open(sqlite.Open(cfg.Path), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
