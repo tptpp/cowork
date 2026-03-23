@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/tp/cowork/internal/coordinator/store"
 	"github.com/tp/cowork/internal/coordinator/tools"
@@ -354,19 +355,80 @@ func (c *ConversationCoordinator) executeToolCall(
 		}, nil
 	}
 
-	// 远程工具 - 目前返回等待消息
-	// Phase 3 将实现完整的远程执行
-	if err := c.toolExecStore.Create(execution); err != nil {
-		return ToolResultInfo{}, fmt.Errorf("failed to create execution record: %w", err)
+	// 远程工具 - 通过 scheduler 调度执行
+	if c.scheduler == nil {
+		// 没有 scheduler，只能创建记录等待
+		if err := c.toolExecStore.Create(execution); err != nil {
+			return ToolResultInfo{}, fmt.Errorf("failed to create execution record: %w", err)
+		}
+		return ToolResultInfo{
+			ToolCallID: toolCall.ID,
+			ToolName:   toolCall.Function.Name,
+			Result:     fmt.Sprintf("Tool execution pending (ID: %d). Remote tools require worker execution.", execution.ID),
+			IsError:    false,
+		}, nil
 	}
 
-	// 标记为等待执行
+	// 使用 scheduler 调度执行
+	if err := c.scheduler.Schedule(execution); err != nil {
+		return ToolResultInfo{
+			ToolCallID: toolCall.ID,
+			ToolName:   toolCall.Function.Name,
+			Result:     fmt.Sprintf("Failed to schedule tool execution: %v", err),
+			IsError:    true,
+		}, nil
+	}
+
+	// 等待远程工具执行完成（最多等待 60 秒）
+	result := c.waitForToolExecution(execution, 60*time.Second)
+	return result, nil
+}
+
+// waitForToolExecution 等待工具执行完成
+func (c *ConversationCoordinator) waitForToolExecution(execution *models.ToolExecution, timeout time.Duration) ToolResultInfo {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		// 查询执行状态
+		exec, err := c.toolExecStore.Get(execution.ID)
+		if err != nil {
+			return ToolResultInfo{
+				ToolCallID: execution.ToolCallID,
+				ToolName:   execution.ToolName,
+				Result:     fmt.Sprintf("Failed to get execution status: %v", err),
+				IsError:    true,
+			}
+		}
+
+		// 检查是否完成
+		if exec.Status == string(models.ToolExecutionStatusCompleted) {
+			return ToolResultInfo{
+				ToolCallID: execution.ToolCallID,
+				ToolName:   execution.ToolName,
+				Result:     exec.Result,
+				IsError:    exec.IsError,
+			}
+		}
+
+		if exec.Status == string(models.ToolExecutionStatusFailed) {
+			return ToolResultInfo{
+				ToolCallID: execution.ToolCallID,
+				ToolName:   execution.ToolName,
+				Result:     exec.Result,
+				IsError:    true,
+			}
+		}
+
+		// 等待 500ms 后重试
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// 超时
 	return ToolResultInfo{
-		ToolCallID: toolCall.ID,
-		ToolName:   toolCall.Function.Name,
-		Result:     fmt.Sprintf("Tool execution pending (ID: %d). Remote tools require worker execution.", execution.ID),
-		IsError:    false,
-	}, nil
+		ToolCallID: execution.ToolCallID,
+		ToolName:   execution.ToolName,
+		Result:     fmt.Sprintf("Tool execution timed out after %v", timeout),
+		IsError:    true,
+	}
 }
 
 // saveMessage 保存消息

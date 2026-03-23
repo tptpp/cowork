@@ -43,3 +43,9 @@ func GetWorkerWorkspaceDir(name string) string {
 func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0755)
 }
+
+// GetSettingFilePath 返回配置文件路径 ~/.cowork/setting.json
+// Worker 从此文件读取 AI 配置等
+func GetSettingFilePath() string {
+	return filepath.Join(GetDefaultBaseDir(), "setting.json")
+}

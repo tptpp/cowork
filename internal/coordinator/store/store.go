@@ -1,15 +1,83 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/tp/cowork/internal/shared/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 )
+
+// slogLogger 是 GORM 的 slog 适配器
+type slogLogger struct {
+	level gormlogger.LogLevel
+}
+
+// NewSlogLogger 创建使用 slog 的 GORM logger
+func NewSlogLogger() gormlogger.Interface {
+	return &slogLogger{level: gormlogger.Warn}
+}
+
+// LogMode 设置日志级别
+func (l *slogLogger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
+	newLogger := *l
+	newLogger.level = level
+	return &newLogger
+}
+
+// Info 输出 info 级别日志
+func (l *slogLogger) Info(ctx context.Context, msg string, data ...interface{}) {
+	if l.level >= gormlogger.Info {
+		slog.InfoContext(ctx, fmt.Sprintf(msg, data...))
+	}
+}
+
+// Warn 输出 warn 级别日志
+func (l *slogLogger) Warn(ctx context.Context, msg string, data ...interface{}) {
+	if l.level >= gormlogger.Warn {
+		slog.WarnContext(ctx, fmt.Sprintf(msg, data...))
+	}
+}
+
+// Error 输出 error 级别日志
+func (l *slogLogger) Error(ctx context.Context, msg string, data ...interface{}) {
+	if l.level >= gormlogger.Error {
+		slog.ErrorContext(ctx, fmt.Sprintf(msg, data...))
+	}
+}
+
+// Trace 输出 trace 级别日志（SQL 执行）
+func (l *slogLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
+	if l.level <= gormlogger.Silent {
+		return
+	}
+
+	elapsed := time.Since(begin)
+	sql, rows := fc()
+
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		slog.ErrorContext(ctx, "SQL error",
+			"error", err,
+			"sql", sql,
+			"rows", rows,
+			"elapsed", elapsed,
+		)
+		return
+	}
+
+	if l.level >= gormlogger.Info {
+		slog.DebugContext(ctx, "SQL",
+			"sql", sql,
+			"rows", rows,
+			"elapsed", elapsed,
+		)
+	}
+}
 
 // Config 数据库配置
 type Config struct {
@@ -24,7 +92,7 @@ type Store struct {
 // New 创建新的数据库存储
 func New(cfg Config) (*Store, error) {
 	db, err := gorm.Open(sqlite.Open(cfg.Path), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: NewSlogLogger(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
@@ -79,6 +147,7 @@ type TaskStore interface {
 	Delete(id string) error
 	GetByStatus(status models.TaskStatus) ([]models.Task, error)
 	CountByStatus() (map[models.TaskStatus]int64, error)
+	ListByWorkerID(workerID string) ([]models.Task, error)
 }
 
 // taskStore 任务存储实现
@@ -195,6 +264,13 @@ func (s *taskStore) CountByStatus() (map[models.TaskStatus]int64, error) {
 	}
 
 	return counts, nil
+}
+
+// ListByWorkerID 获取指定 Worker 的所有任务
+func (s *taskStore) ListByWorkerID(workerID string) ([]models.Task, error) {
+	var tasks []models.Task
+	err := s.db.Where("worker_id = ?", workerID).Find(&tasks).Error
+	return tasks, err
 }
 
 // WorkerStore Worker 存储接口

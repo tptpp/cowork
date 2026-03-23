@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tp/cowork/internal/coordinator/agent"
 	"github.com/tp/cowork/internal/coordinator/scheduler"
 	"github.com/tp/cowork/internal/coordinator/store"
 	"github.com/tp/cowork/internal/coordinator/tools"
@@ -31,6 +32,7 @@ type Handler struct {
 	hub              *ws.Hub
 	scheduler        *scheduler.Scheduler
 	startTime        time.Time
+	modelRouter      *ModelRouter // 全局模型路由
 }
 
 // NewHandler 创建处理器
@@ -61,7 +63,25 @@ func NewHandler(
 		hub:              hub,
 		scheduler:        sched,
 		startTime:        time.Now(),
+		modelRouter:      NewModelRouter(),
 	}
+}
+
+// SetAIConfig 设置 AI 配置（从配置文件加载）
+func (h *Handler) SetAIConfig(modelType, baseURL, model, apiKey string) {
+	h.modelRouter.LoadFromConfig(modelType, baseURL, model, apiKey)
+	// 同时设置 AgentHandler 的 modelRouter
+	h.agentHandler.SetModelRouter(h.modelRouter)
+}
+
+// GetModelRouter 获取模型路由
+func (h *Handler) GetModelRouter() *ModelRouter {
+	return h.modelRouter
+}
+
+// SetAgentCoordinator 设置 Agent 协调器（支持 Function Calling）
+func (h *Handler) SetAgentCoordinator(coordinator *agent.ConversationCoordinator) {
+	h.agentHandler.SetCoordinator(coordinator)
 }
 
 // Response 通用响应
@@ -218,12 +238,24 @@ func (h *Handler) GetSystemStats(c *gin.Context) {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	Type          string              `json:"type" binding:"required"`
-	Description   string              `json:"description"`
-	Priority      models.Priority     `json:"priority"`
-	RequiredTags  []string            `json:"required_tags"`
-	Input         models.JSON         `json:"input"`
-	Config        models.JSON         `json:"config"`
+	Type           string              `json:"type" binding:"required"`
+	Description    string              `json:"description"`
+	Title          string              `json:"title"`
+	Priority       models.Priority     `json:"priority"`
+	RequiredTags   []string            `json:"required_tags"`
+	Input          models.JSON         `json:"input"`
+	Config         models.JSON         `json:"config"`
+
+	// 重试配置
+	MaxRetries     int                 `json:"max_retries"`
+	RetryDelay     int                 `json:"retry_delay"`
+	RetryOnFailure bool                `json:"retry_on_failure"`
+
+	// 超时配置
+	Timeout        int                 `json:"timeout"` // 秒
+
+	// 依赖
+	DependsOn      []string            `json:"depends_on"` // 依赖的任务 ID 列表
 }
 
 // CreateTask 创建任务
@@ -241,20 +273,39 @@ func (h *Handler) CreateTask(c *gin.Context) {
 	}
 
 	task := &models.Task{
-		ID:           uuid.New().String(),
-		Type:         req.Type,
-		Description:  req.Description,
-		Status:       models.TaskStatusPending,
-		Priority:     priority,
-		RequiredTags: req.RequiredTags,
-		Input:        req.Input,
-		Config:       req.Config,
+		ID:             uuid.New().String(),
+		Type:           req.Type,
+		Description:    req.Description,
+		Title:          req.Title,
+		Status:         models.TaskStatusPending,
+		Priority:       priority,
+		RequiredTags:   req.RequiredTags,
+		Input:          req.Input,
+		Config:         req.Config,
+		MaxRetries:     req.MaxRetries,
+		RetryDelay:     req.RetryDelay,
+		RetryOnFailure: req.RetryOnFailure,
+		Timeout:        req.Timeout,
+	}
+
+	// 设置默认值
+	if task.MaxRetries <= 0 {
+		task.MaxRetries = 3
+	}
+	if task.RetryDelay <= 0 {
+		task.RetryDelay = 60
+	}
+	if task.Timeout <= 0 {
+		task.Timeout = 1800 // 默认 30 分钟
 	}
 
 	if err := h.taskStore.Create(task); err != nil {
 		failWithError(c, errors.WrapInternal("Failed to create task", err))
 		return
 	}
+
+	// TODO: 处理任务依赖关系 (req.DependsOn)
+	// 需要 Handler 添加 depStore 字段并在 main.go 中注入
 
 	success(c, task)
 }
@@ -368,11 +419,12 @@ func (h *Handler) GetTaskLogs(c *gin.Context) {
 
 // RegisterWorkerRequest 注册 Worker 请求
 type RegisterWorkerRequest struct {
-	Name          string       `json:"name" binding:"required"`
-	Tags          []string     `json:"tags" binding:"required"`
-	MaxConcurrent int          `json:"max_concurrent"`
-	Capabilities  models.JSON  `json:"capabilities"`
-	Metadata      models.JSON  `json:"metadata"`
+	Name          string      `json:"name" binding:"required"`
+	Tags          []string    `json:"tags" binding:"required"`
+	MaxConcurrent int         `json:"max_concurrent"`
+	Capabilities  models.JSON `json:"capabilities"`
+	Metadata      models.JSON `json:"metadata"`
+	Description   string      `json:"description"` // Worker 描述
 }
 
 // RegisterWorker 注册 Worker
@@ -388,6 +440,12 @@ func (h *Handler) RegisterWorker(c *gin.Context) {
 		// 已存在，更新状态
 		existing.Status = models.WorkerStatusIdle
 		existing.LastSeen = time.Now()
+		if req.Description != "" {
+			existing.Description = req.Description
+		}
+		if req.Capabilities != nil {
+			existing.Capabilities = req.Capabilities
+		}
 		if err := h.workerStore.Update(existing); err != nil {
 			failWithError(c, errors.WrapInternal("Failed to update worker", err))
 			return
@@ -398,6 +456,7 @@ func (h *Handler) RegisterWorker(c *gin.Context) {
 			"status":            existing.Status,
 			"heartbeat_interval": 5,
 			"created_at":        existing.CreatedAt,
+			"description":       existing.Description,
 		})
 		return
 	}
@@ -411,6 +470,7 @@ func (h *Handler) RegisterWorker(c *gin.Context) {
 		MaxConcurrent: req.MaxConcurrent,
 		Capabilities:  req.Capabilities,
 		Metadata:      req.Metadata,
+		Description:   req.Description,
 		LastSeen:      time.Now(),
 	}
 
@@ -429,6 +489,7 @@ func (h *Handler) RegisterWorker(c *gin.Context) {
 		"status":             worker.Status,
 		"heartbeat_interval": 5,
 		"created_at":         worker.CreatedAt,
+		"description":        worker.Description,
 	})
 }
 
@@ -472,12 +533,35 @@ func (h *Handler) WorkerHeartbeat(c *gin.Context) {
 		return
 	}
 
+	// 获取分配给该 Worker 但尚未确认的任务
+	// 任务状态为 running 且 worker_id 匹配，但 Worker 的 current_tasks 中不包含
+	var assignedTasks []string
+	var cancelledTasks []string
+
+	// 获取该 Worker 的所有 running 任务
+	runningTasks, err := h.taskStore.ListByWorkerID(id)
+	if err == nil {
+		currentTasksMap := make(map[string]bool)
+		for _, t := range req.CurrentTasks {
+			currentTasksMap[t] = true
+		}
+
+		for _, task := range runningTasks {
+			if task.Status == models.TaskStatusRunning {
+				// 如果 Worker 不知道这个任务，说明是新分配的
+				if !currentTasksMap[task.ID] {
+					assignedTasks = append(assignedTasks, task.ID)
+				}
+			}
+		}
+	}
+
 	// 广播 Worker 状态更新
 	h.hub.BroadcastToChannel("workers", []byte(`{"type":"worker_update","payload":{"id":"`+id+`","status":"`+string(req.Status)+`"}}`))
 
 	success(c, HeartbeatResponse{
-		AssignedTasks:  []string{},
-		CancelledTasks: []string{},
+		AssignedTasks:  assignedTasks,
+		CancelledTasks: cancelledTasks,
 		Commands:       []string{},
 	})
 }
@@ -550,6 +634,8 @@ func (h *Handler) UpdateTaskStatus(c *gin.Context) {
 		return
 	}
 
+	previousStatus := task.Status
+
 	// 更新状态
 	task.Status = req.Status
 	if req.Progress > 0 {
@@ -571,6 +657,13 @@ func (h *Handler) UpdateTaskStatus(c *gin.Context) {
 	if err := h.taskStore.Update(task); err != nil {
 		failWithError(c, errors.WrapInternal("Failed to update task", err))
 		return
+	}
+
+	// 更新 Worker 负载 - 任务从 running 变为完成/失败时释放
+	if previousStatus == models.TaskStatusRunning &&
+		(req.Status == models.TaskStatusCompleted || req.Status == models.TaskStatusFailed) &&
+		task.WorkerID != nil && h.scheduler != nil {
+		h.scheduler.ReleaseWorkerLoad(*task.WorkerID)
 	}
 
 	// 广播任务状态更新

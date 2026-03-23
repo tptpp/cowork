@@ -1,9 +1,10 @@
 package logger
 
 import (
-	"io"
+	"context"
+	"log/slog"
 	"os"
-	"time"
+	"sync"
 
 	"github.com/rs/zerolog"
 )
@@ -24,139 +25,177 @@ func DefaultConfig() Config {
 	}
 }
 
-var (
-	// 全局 logger 实例
-	log zerolog.Logger
-)
-
-func init() {
-	// 初始化默认 logger
-	log = New(DefaultConfig())
+// zerologHandler 是 slog.Handler 的 zerolog 实现
+type zerologHandler struct {
+	zl    zerolog.Logger
+	mu    sync.Mutex
+	attrs []slog.Attr
+	level slog.Level
 }
 
-// New 创建新的 logger
-func New(cfg Config) zerolog.Logger {
+// New 创建新的 slog.Logger
+func New(level, format string) *slog.Logger {
 	// 设置输出
-	var output io.Writer
-	switch cfg.Output {
-	case "stderr":
-		output = os.Stderr
-	default:
-		output = os.Stdout
-	}
+	output := os.Stdout
+
+	// 创建 zerolog logger
+	zl := zerolog.New(output).With().Timestamp().Logger()
 
 	// 设置格式
-	if cfg.Format == "text" {
-		// 使用 ConsoleWriter 进行人类可读的输出
-		output = zerolog.ConsoleWriter{
+	if format == "text" {
+		zl = zl.Output(zerolog.ConsoleWriter{
 			Out:        output,
-			TimeFormat: time.RFC3339,
-		}
+			TimeFormat: "2006-01-02 15:04:05",
+		})
 	}
 
 	// 设置日志级别
-	level, err := zerolog.ParseLevel(cfg.Level)
-	if err != nil {
-		level = zerolog.InfoLevel
+	var lvl slog.Level
+	switch level {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "warn":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	default:
+		lvl = slog.LevelInfo
 	}
 
-	return zerolog.New(output).Level(level).With().Timestamp().Logger()
+	return slog.New(&zerologHandler{
+		zl:    zl,
+		level: lvl,
+	})
 }
 
-// SetLogger 设置全局 logger
-func SetLogger(l zerolog.Logger) {
-	log = l
+// Init 初始化全局默认 logger
+func Init(level, format string) {
+	slog.SetDefault(New(level, format))
 }
 
 // Configure 使用配置初始化全局 logger
 func Configure(cfg Config) {
-	log = New(cfg)
+	Init(cfg.Level, cfg.Format)
 }
 
-// GetLogger 获取全局 logger
-func GetLogger() *zerolog.Logger {
-	return &log
+// Enabled 检查日志级别是否启用
+func (h *zerologHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= h.level
 }
 
-// --- 便捷方法 ---
+// Handle 处理日志记录
+func (h *zerologHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
-// Debug 输出 debug 日志
-func Debug() *zerolog.Event {
-	return log.Debug()
-}
-
-// Info 输出 info 日志
-func Info() *zerolog.Event {
-	return log.Info()
-}
-
-// Warn 输出 warn 日志
-func Warn() *zerolog.Event {
-	return log.Warn()
-}
-
-// Error 输出 error 日志
-func Error() *zerolog.Event {
-	return log.Error()
-}
-
-// Fatal 输出 fatal 日志并退出
-func Fatal() *zerolog.Event {
-	return log.Fatal()
-}
-
-// Panic 输出 panic 日志并 panic
-func Panic() *zerolog.Event {
-	return log.Panic()
-}
-
-// With 返回带有字段的 logger
-func With() zerolog.Context {
-	return log.With()
-}
-
-// --- 上下文日志 ---
-
-// Logger 从上下文获取 logger
-type Logger struct {
-	zl zerolog.Logger
-}
-
-// NewLogger 创建新的 Logger
-func NewLogger(cfg Config) *Logger {
-	return &Logger{zl: New(cfg)}
-}
-
-// WithField 添加字段
-func (l *Logger) WithField(key string, value interface{}) *Logger {
-	return &Logger{zl: l.zl.With().Interface(key, value).Logger()}
-}
-
-// WithFields 添加多个字段
-func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
-	ctx := l.zl.With()
-	for k, v := range fields {
-		ctx = ctx.Interface(k, v)
+	var event *zerolog.Event
+	switch r.Level {
+	case slog.LevelDebug:
+		event = h.zl.Debug()
+	case slog.LevelInfo:
+		event = h.zl.Info()
+	case slog.LevelWarn:
+		event = h.zl.Warn()
+	case slog.LevelError:
+		event = h.zl.Error()
+	default:
+		event = h.zl.Info()
 	}
-	return &Logger{zl: ctx.Logger()}
+
+	// 添加属性
+	for _, attr := range h.attrs {
+		event = addAttr(event, attr)
+	}
+
+	// 添加记录属性
+	r.Attrs(func(attr slog.Attr) bool {
+		event = addAttr(event, attr)
+		return true
+	})
+
+	event.Msg(r.Message)
+	return nil
 }
 
-// Debug 输出 debug 日志
-func (l *Logger) Debug() *zerolog.Event {
-	return l.zl.Debug()
+// WithAttrs 返回带有属性的新 handler
+func (h *zerologHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	newAttrs := make([]slog.Attr, len(h.attrs)+len(attrs))
+	copy(newAttrs, h.attrs)
+	copy(newAttrs[len(h.attrs):], attrs)
+
+	return &zerologHandler{
+		zl:    h.zl,
+		attrs: newAttrs,
+		level: h.level,
+	}
 }
 
-// Info 输出 info 日志
-func (l *Logger) Info() *zerolog.Event {
-	return l.zl.Info()
+// WithGroup 返回带有分组的新 handler
+func (h *zerologHandler) WithGroup(name string) slog.Handler {
+	// 简化实现：直接返回当前 handler
+	// 分组功能可以后续增强
+	return h
 }
 
-// Warn 输出 warn 日志
-func (l *Logger) Warn() *zerolog.Event {
-	return l.zl.Warn()
+// addAttr 将 slog.Attr 添加到 zerolog.Event
+func addAttr(event *zerolog.Event, attr slog.Attr) *zerolog.Event {
+	if attr.Key == "" {
+		return event
+	}
+
+	// 处理 slog.Value
+	value := attr.Value
+	kind := value.Kind()
+
+	switch kind {
+	case slog.KindString:
+		event.Str(attr.Key, value.String())
+	case slog.KindInt64:
+		event.Int64(attr.Key, value.Int64())
+	case slog.KindUint64:
+		event.Uint64(attr.Key, value.Uint64())
+	case slog.KindFloat64:
+		event.Float64(attr.Key, value.Float64())
+	case slog.KindBool:
+		event.Bool(attr.Key, value.Bool())
+	case slog.KindTime:
+		event.Time(attr.Key, value.Time())
+	case slog.KindDuration:
+		event.Dur(attr.Key, value.Duration())
+	case slog.KindGroup:
+		// 处理组属性
+		groupAttrs := value.Group()
+		for _, ga := range groupAttrs {
+			event = addAttr(event, ga)
+		}
+	default:
+		// 使用 Any() 处理其他类型
+		event.Any(attr.Key, value.Any())
+	}
+
+	return event
 }
 
-// Error 输出 error 日志
-func (l *Logger) Error() *zerolog.Event {
-	return l.zl.Error()
+// --- 上下文日志辅助函数 ---
+
+// ctxKey 上下文键类型
+type ctxKey struct{}
+
+// loggerKey logger 上下文键
+var loggerKey = ctxKey{}
+
+// WithContext 将 logger 添加到上下文
+func WithContext(ctx context.Context, logger *slog.Logger) context.Context {
+	return context.WithValue(ctx, loggerKey, logger)
+}
+
+// FromContext 从上下文获取 logger
+func FromContext(ctx context.Context) *slog.Logger {
+	if logger, ok := ctx.Value(loggerKey).(*slog.Logger); ok {
+		return logger
+	}
+	return slog.Default()
 }

@@ -5,19 +5,19 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	"github.com/tp/cowork/internal/shared/config"
 	"github.com/tp/cowork/internal/shared/logger"
 	"github.com/tp/cowork/internal/shared/models"
+	"github.com/tp/cowork/internal/shared/utils"
+	"github.com/tp/cowork/internal/worker/ai"
 	"github.com/tp/cowork/internal/worker/executor"
 )
 
@@ -30,6 +30,20 @@ type WorkerConfig struct {
 	WorkDir        string
 	DockerEnabled  bool
 	DockerImage    string
+
+	// AI 配置
+	AIBaseURL     string
+	AIModel       string
+	AIAPIKey      string
+	SystemPrompt  string
+	AIMaxTokens   int
+	AITemperature float64
+	Description   string
+
+	// 工具配置
+	EnabledTools  []string
+	AllowedPaths  []string
+	ShellTimeout  int
 }
 
 // CoordinatorClient Coordinator 客户端
@@ -87,11 +101,19 @@ type TaskLogRequest struct {
 }
 
 // Register 注册 Worker
-func (c *CoordinatorClient) Register(name string, tags []string, maxConcurrent int) (*RegisterResponse, error) {
+func (c *CoordinatorClient) Register(name string, tags []string, maxConcurrent int, description string, capabilities map[string]interface{}) (*RegisterResponse, error) {
 	payload := map[string]interface{}{
 		"name":           name,
 		"tags":           tags,
 		"max_concurrent": maxConcurrent,
+	}
+
+	// 添加描述和能力信息
+	if description != "" {
+		payload["description"] = description
+	}
+	if capabilities != nil {
+		payload["capabilities"] = capabilities
 	}
 
 	body, err := json.Marshal(payload)
@@ -240,6 +262,7 @@ type Worker struct {
 	executor       *executor.Executor
 	toolExecutor   *executor.ToolExecutor
 	dockerExecutor *executor.DockerExecutor
+	aiClient       *ai.AIClient
 	id             string
 	status         string
 	tasks          map[string]*RunningTask
@@ -272,6 +295,9 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 		// 使用 ~/.cowork/workers/{name}/workspace 作为工作目录
 		execConfig.BaseWorkDir = config.GetWorkerWorkspaceDir(cfg.Name)
 	}
+	// 设置允许访问的路径
+	execConfig.AllowedPaths = cfg.AllowedPaths
+	slog.Info("Worker config", "allowed_paths", cfg.AllowedPaths, "work_dir", execConfig.BaseWorkDir)
 
 	worker := &Worker{
 		config:   cfg,
@@ -280,6 +306,18 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 		status:   "idle",
 		tasks:    make(map[string]*RunningTask),
 		stopCh:   make(chan struct{}),
+	}
+
+	// 初始化 AI 客户端（如果配置了）
+	if cfg.AIBaseURL != "" && cfg.AIModel != "" && cfg.AIAPIKey != "" {
+		worker.aiClient = ai.NewAIClient(cfg.AIBaseURL, cfg.AIModel, cfg.AIAPIKey)
+		worker.executor.SetAIClient(worker.aiClient)
+		worker.executor.SetSystemPrompt(cfg.SystemPrompt)
+		worker.executor.SetEnabledTools(cfg.EnabledTools)
+		worker.executor.SetAllowedPaths(cfg.AllowedPaths)
+		slog.Info("AI client initialized", "model", cfg.AIModel, "base_url", cfg.AIBaseURL)
+	} else {
+		slog.Warn("AI client not configured, agent tasks will use fallback execution")
 	}
 
 	// 初始化工具执行器（使用远程注册表客户端）
@@ -302,11 +340,11 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 
 		dockerExec, err := executor.NewDockerExecutor(dockerConfig)
 		if err != nil {
-			log.Warn().Err(err).Msg("Docker executor not available, falling back to local execution")
+			slog.Warn("Docker executor not available, falling back to local execution", "error", err)
 		} else {
 			worker.dockerExecutor = dockerExec
 			worker.toolExecutor.SetDockerExecutor(dockerExec)
-			log.Info().Str("image", dockerConfig.DefaultImage).Msg("Docker executor enabled")
+			slog.Info("Docker executor enabled", "image", dockerConfig.DefaultImage)
 		}
 	}
 
@@ -315,15 +353,23 @@ func NewWorker(cfg *WorkerConfig) *Worker {
 
 // Start 启动 Worker
 func (w *Worker) Start() error {
+	// 构建能力信息
+	capabilities := map[string]interface{}{
+		"tools": w.config.EnabledTools,
+	}
+	if w.dockerExecutor != nil {
+		capabilities["docker"] = true
+	}
+
 	// 注册到 Coordinator
-	resp, err := w.client.Register(w.config.Name, w.config.Tags, w.config.MaxConcurrent)
+	resp, err := w.client.Register(w.config.Name, w.config.Tags, w.config.MaxConcurrent, w.config.Description, capabilities)
 	if err != nil {
 		return fmt.Errorf("failed to register: %w", err)
 	}
 
 	w.id = resp.ID
 	w.client.workerID = resp.ID
-	log.Info().Str("id", w.id).Str("name", w.config.Name).Msg("Worker registered")
+	slog.Info("Worker registered", "id", w.id, "name", w.config.Name)
 
 	// 确保工作目录存在
 	// 默认使用 ~/.cowork/workers/{worker-name}/workspace，持久化且避免与其他进程冲突
@@ -334,7 +380,7 @@ func (w *Worker) Start() error {
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return fmt.Errorf("failed to create work directory: %w", err)
 	}
-	log.Info().Str("path", workDir).Msg("Work directory ready")
+	slog.Info("Work directory ready", "path", workDir)
 
 	// 启动心跳循环
 	go w.heartbeatLoop(resp.HeartbeatInterval)
@@ -349,7 +395,7 @@ func (w *Worker) Stop() {
 	if w.dockerExecutor != nil {
 		w.dockerExecutor.Cleanup()
 	}
-	log.Info().Str("id", w.id).Msg("Worker stopped")
+	slog.Info("Worker stopped", "id", w.id)
 }
 
 // heartbeatLoop 心跳循环
@@ -363,7 +409,7 @@ func (w *Worker) heartbeatLoop(interval int) {
 			return
 		case <-ticker.C:
 			if err := w.sendHeartbeat(); err != nil {
-				log.Error().Err(err).Msg("Heartbeat failed")
+				slog.Error("Heartbeat failed", "error", err)
 			}
 		}
 	}
@@ -394,7 +440,7 @@ func (w *Worker) sendHeartbeat() error {
 
 	// 处理分配的任务
 	if len(resp.AssignedTasks) > 0 {
-		log.Info().Strs("tasks", resp.AssignedTasks).Msg("Received assigned tasks")
+		slog.Info("Received assigned tasks", "tasks", resp.AssignedTasks)
 		for _, taskID := range resp.AssignedTasks {
 			go w.executeTask(taskID)
 		}
@@ -402,7 +448,7 @@ func (w *Worker) sendHeartbeat() error {
 
 	// 处理取消的任务
 	if len(resp.CancelledTasks) > 0 {
-		log.Info().Strs("tasks", resp.CancelledTasks).Msg("Received cancelled tasks")
+		slog.Info("Received cancelled tasks", "tasks", resp.CancelledTasks)
 		for _, taskID := range resp.CancelledTasks {
 			w.cancelTask(taskID)
 		}
@@ -413,12 +459,12 @@ func (w *Worker) sendHeartbeat() error {
 
 // executeTask 执行任务
 func (w *Worker) executeTask(taskID string) {
-	log.Info().Str("task_id", taskID).Msg("Executing task")
+	slog.Info("Executing task", "task_id", taskID)
 
 	// 获取任务详情
 	task, err := w.client.FetchTask(taskID)
 	if err != nil {
-		log.Error().Err(err).Str("task_id", taskID).Msg("Failed to fetch task")
+		slog.Error("Failed to fetch task", "task_id", taskID, "error", err)
 		return
 	}
 
@@ -455,17 +501,17 @@ func (w *Worker) executeTask(taskID string) {
 	switch task.Type {
 	case "tool":
 		// 工具执行任务 - 使用 ToolExecutor
-		log.Info().Str("task_id", taskID).Str("tool_name", task.ToolName).Msg("Executing tool task")
+		slog.Info("Executing tool task", "task_id", taskID, "tool_name", task.ToolName)
 		result = w.toolExecutor.ExecuteToolFromTask(task, callback)
 
 	case "shell", "script":
 		// Shell/脚本任务
 		if w.shouldUseDocker(task) {
 			if w.dockerExecutor != nil {
-				log.Info().Str("task_id", taskID).Msg("Using Docker executor")
+				slog.Info("Using Docker executor", "task_id", taskID)
 				result = w.dockerExecutor.Execute(task, callback)
 			} else {
-				log.Warn().Str("task_id", taskID).Msg("Docker requested but not available, using local executor")
+				slog.Warn("Docker requested but not available, using local executor", "task_id", taskID)
 				result = w.executor.Execute(task, callback)
 			}
 		} else {
@@ -475,7 +521,7 @@ func (w *Worker) executeTask(taskID string) {
 	case "docker", "sandbox":
 		// Docker 隔离任务
 		if w.dockerExecutor != nil {
-			log.Info().Str("task_id", taskID).Msg("Using Docker executor for isolated task")
+			slog.Info("Using Docker executor for isolated task", "task_id", taskID)
 			result = w.dockerExecutor.Execute(task, callback)
 		} else {
 			result = &executor.TaskResult{
@@ -497,13 +543,13 @@ func (w *Worker) executeTask(taskID string) {
 			Progress: 100,
 			Output:   result.Output,
 		})
-		log.Info().Str("task_id", taskID).Msg("Task completed")
+		slog.Info("Task completed", "task_id", taskID)
 	} else {
 		w.client.UpdateTask(taskID, TaskUpdateRequest{
 			Status: models.TaskStatusFailed,
 			Error:  result.Error,
 		})
-		log.Error().Str("task_id", taskID).Str("error", result.Error).Msg("Task failed")
+		slog.Error("Task failed", "task_id", taskID, "error", result.Error)
 	}
 
 	// 发送日志
@@ -547,9 +593,9 @@ func (w *Worker) cancelTask(taskID string) {
 
 	if exists {
 		if err := w.executor.Cancel(taskID); err != nil {
-			log.Error().Err(err).Str("task_id", taskID).Msg("Failed to cancel task")
+			slog.Error("Failed to cancel task", "task_id", taskID, "error", err)
 		} else {
-			log.Info().Str("task_id", taskID).Msg("Task cancelled")
+			slog.Info("Task cancelled", "task_id", taskID)
 		}
 	}
 }
@@ -585,7 +631,7 @@ func (c *taskCallback) OnLog(taskID string, level, message string) {
 
 func (c *taskCallback) OnComplete(taskID string, result *executor.TaskResult) {
 	// 任务完成时的回调处理
-	log.Info().Str("task_id", taskID).Str("status", string(result.Status)).Msg("Task execution finished")
+	slog.Info("Task execution finished", "task_id", taskID, "status", string(result.Status))
 }
 
 func main() {
@@ -598,12 +644,9 @@ func main() {
 	if logFormat == "" {
 		logFormat = "text"
 	}
-	logger.Configure(logger.Config{
-		Level:  logLevel,
-		Format: logFormat,
-	})
+	logger.Init(logLevel, logFormat)
 
-	// 命令行参数
+	// 基本命令行参数
 	name := flag.String("name", "", "Worker name (required)")
 	tagsStr := flag.String("tags", "", "Worker tags (comma-separated)")
 	coordinator := flag.String("coordinator", "http://localhost:8080", "Coordinator URL")
@@ -611,26 +654,37 @@ func main() {
 	workDir := flag.String("work-dir", "", "Base work directory")
 	dockerEnabled := flag.Bool("docker", false, "Enable Docker executor")
 	dockerImage := flag.String("docker-image", "alpine:latest", "Default Docker image for tasks")
+
+	// AI 配置参数
+	aiBaseURL := flag.String("ai-base-url", "", "AI API base URL (required for agent tasks)")
+	aiModel := flag.String("ai-model", "", "AI model name (required for agent tasks)")
+	aiAPIKey := flag.String("ai-api-key", "", "AI API key (can also use AI_API_KEY env var)")
+	systemPrompt := flag.String("system-prompt", "", "System prompt for AI agent")
+	systemPromptFile := flag.String("system-prompt-file", "", "Path to file containing system prompt")
+	description := flag.String("description", "", "Worker description for coordinator")
+	aiMaxTokens := flag.Int("ai-max-tokens", 4096, "Maximum tokens for AI response")
+	aiTemperature := flag.Float64("ai-temperature", 0.7, "Temperature for AI response")
+
+	// 工具配置参数
+	toolsStr := flag.String("tools", "shell,file", "Enabled tools (comma-separated: shell,file,web)")
+	allowedPathsStr := flag.String("allowed-paths", "", "Allowed paths for file operations (comma-separated)")
+	shellTimeout := flag.Int("shell-timeout", 300, "Shell command timeout in seconds")
+
 	flag.Parse()
 
-	// 验证参数
+	// 验证必需参数
 	if *name == "" {
-		log.Fatal().Msg("Worker name is required")
-	}
-	if *tagsStr == "" {
-		log.Fatal().Msg("Worker tags are required")
+		slog.Error("Worker name is required")
+		os.Exit(1)
 	}
 
-	// 解析标签
-	tags := strings.Split(*tagsStr, ",")
-	for i, tag := range tags {
-		tags[i] = strings.TrimSpace(tag)
-	}
+	// 尝试从配置文件加载配置
+	configPath := config.GetSettingFilePath()
+	workerConfig := loadWorkerConfig(*name, configPath)
 
-	// 创建 Worker
+	// 合并配置：命令行参数优先
 	cfg := &WorkerConfig{
 		Name:           *name,
-		Tags:           tags,
 		CoordinatorURL: *coordinator,
 		MaxConcurrent:  *maxConcurrent,
 		WorkDir:        *workDir,
@@ -638,14 +692,101 @@ func main() {
 		DockerImage:    *dockerImage,
 	}
 
+	// 标签配置
+	if *tagsStr != "" {
+		cfg.Tags = utils.ParseStringList(*tagsStr)
+	} else if len(workerConfig.Tags) > 0 {
+		cfg.Tags = workerConfig.Tags
+	} else {
+		slog.Error("Worker tags are required")
+		os.Exit(1)
+	}
+
+	// AI 配置合并
+	if *aiBaseURL != "" {
+		cfg.AIBaseURL = *aiBaseURL
+	} else if workerConfig.AIBaseURL != "" {
+		cfg.AIBaseURL = workerConfig.AIBaseURL
+	}
+
+	if *aiModel != "" {
+		cfg.AIModel = *aiModel
+	} else if workerConfig.AIModel != "" {
+		cfg.AIModel = workerConfig.AIModel
+	}
+
+	// API Key: 命令行 > 配置文件 > 环境变量
+	if *aiAPIKey != "" {
+		cfg.AIAPIKey = *aiAPIKey
+	} else if workerConfig.AIAPIKey != "" {
+		cfg.AIAPIKey = utils.ExpandEnvVars(workerConfig.AIAPIKey)
+	} else {
+		cfg.AIAPIKey = os.Getenv("AI_API_KEY")
+	}
+
+	// System prompt: 命令行 > 文件 > 配置文件
+	if *systemPrompt != "" {
+		cfg.SystemPrompt = *systemPrompt
+	} else if *systemPromptFile != "" {
+		data, err := os.ReadFile(*systemPromptFile)
+		if err != nil {
+			slog.Error("Failed to read system prompt file", "error", err)
+			os.Exit(1)
+		}
+		cfg.SystemPrompt = string(data)
+	} else if workerConfig.SystemPrompt != "" {
+		cfg.SystemPrompt = workerConfig.SystemPrompt
+	} else {
+		// 默认系统提示词
+		cfg.SystemPrompt = getDefaultSystemPrompt(cfg.Name)
+	}
+
+	// 其他 AI 配置
+	cfg.AIMaxTokens = *aiMaxTokens
+	if workerConfig.AIMaxTokens > 0 && *aiMaxTokens == 4096 {
+		cfg.AIMaxTokens = workerConfig.AIMaxTokens
+	}
+	cfg.AITemperature = *aiTemperature
+	if workerConfig.AITemperature > 0 && *aiTemperature == 0.7 {
+		cfg.AITemperature = workerConfig.AITemperature
+	}
+
+	// 描述配置
+	if *description != "" {
+		cfg.Description = *description
+	} else if workerConfig.Description != "" {
+		cfg.Description = workerConfig.Description
+	}
+
+	// 工具配置
+	if *toolsStr != "" {
+		cfg.EnabledTools = utils.ParseStringList(*toolsStr)
+	} else {
+		cfg.EnabledTools = []string{"shell", "file"}
+	}
+
+	if *allowedPathsStr != "" {
+		cfg.AllowedPaths = utils.ParseStringList(*allowedPathsStr)
+	} else if len(workerConfig.AllowedPaths) > 0 {
+		cfg.AllowedPaths = workerConfig.AllowedPaths
+	}
+	cfg.ShellTimeout = *shellTimeout
+
+	// 创建 Worker
 	worker := NewWorker(cfg)
 
 	// 启动 Worker
 	if err := worker.Start(); err != nil {
-		log.Fatal().Err(err).Msg("Failed to start worker")
+		slog.Error("Failed to start worker", "error", err)
+		os.Exit(1)
 	}
 
-	log.Info().Str("name", cfg.Name).Strs("tags", cfg.Tags).Msg("Worker started")
+	slog.Info("Worker started",
+		"name", cfg.Name,
+		"tags", cfg.Tags,
+		"ai_model", cfg.AIModel,
+		"tools", cfg.EnabledTools,
+	)
 
 	// 等待中断信号
 	sigCh := make(chan os.Signal, 1)
@@ -654,12 +795,75 @@ func main() {
 
 	// 停止 Worker
 	worker.Stop()
-	log.Info().Msg("Worker shutdown complete")
+	slog.Info("Worker shutdown complete")
+}
+
+// WorkerConfigFromFile 配置文件中的 Worker 配置
+type WorkerConfigFromFile struct {
+	Tags           []string `json:"tags"`
+	AIBaseURL      string   `json:"ai_base_url"`
+	AIModel        string   `json:"ai_model"`
+	AIAPIKey       string   `json:"ai_api_key"`
+	SystemPrompt   string   `json:"system_prompt"`
+	AIMaxTokens    int      `json:"ai_max_tokens"`
+	AITemperature  float64  `json:"ai_temperature"`
+	Description    string   `json:"description"`
+	AllowedPaths   []string `json:"allowed_paths"`
+}
+
+// SettingFile 配置文件结构
+type SettingFile struct {
+	Workers map[string]WorkerConfigFromFile `json:"worker"`
+}
+
+// loadWorkerConfig 从配置文件加载 Worker 配置
+func loadWorkerConfig(name, configPath string) WorkerConfigFromFile {
+	var cfg WorkerConfigFromFile
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("Failed to read config file", "path", configPath, "error", err)
+		}
+		return cfg
+	}
+
+	var settings SettingFile
+	if err := json.Unmarshal(data, &settings); err != nil {
+		slog.Warn("Failed to parse config file", "path", configPath, "error", err)
+		return cfg
+	}
+
+	if workerCfg, ok := settings.Workers[name]; ok {
+		cfg = workerCfg
+		slog.Info("Loaded config from file", "worker", name)
+	}
+
+	return cfg
+}
+
+// getDefaultSystemPrompt 获取默认系统提示词
+func getDefaultSystemPrompt(workerName string) string {
+	return fmt.Sprintf(`You are an AI agent running as worker "%s".
+
+Your role is to execute tasks assigned by the coordinator. You have access to tools for:
+- Executing shell commands
+- Reading and writing files
+- Other operations as configured
+
+When executing tasks:
+1. Understand the task requirements clearly
+2. Plan your approach before executing
+3. Use tools appropriately and safely
+4. Report progress and results accurately
+5. Handle errors gracefully
+
+Always be helpful, accurate, and safe in your operations.`, workerName)
 }
 
 // readFile 辅助函数
 func readFile(path string) ([]byte, error) {
-	return ioutil.ReadFile(path)
+	return os.ReadFile(path)
 }
 
 // RemoteToolRegistry 远程工具注册表客户端

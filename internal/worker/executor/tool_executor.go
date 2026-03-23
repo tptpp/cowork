@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,29 @@ type ToolExecutor struct {
 	dockerExec   *DockerExecutor
 	registry     ToolRegistry
 	validator    ToolValidator
+}
+
+// isPathAllowed 检查路径是否被允许访问
+func (e *ToolExecutor) isPathAllowed(absPath, absWorkDir string) bool {
+	// 检查是否在工作目录内
+	if strings.HasPrefix(absPath, absWorkDir) {
+		return true
+	}
+
+	// 检查是否在允许的路径列表中
+	for _, allowedPath := range e.config.AllowedPaths {
+		absAllowed, err := filepath.Abs(allowedPath)
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(absPath, absAllowed) {
+			return true
+		}
+	}
+
+	// 调试日志
+	log.Printf("Path %s denied: not in workdir %s or allowed paths %v", absPath, absWorkDir, e.config.AllowedPaths)
+	return false
 }
 
 // ToolRegistry 工具注册表接口
@@ -54,8 +78,25 @@ func (e *ToolExecutor) ExecuteTool(
 	workDir string,
 	callback Callback,
 ) *TaskResult {
+	return e.ExecuteToolWithID(ctx, toolName, args, workDir, callback, "")
+}
+
+// ExecuteToolWithID 执行工具调用（支持指定任务ID）
+func (e *ToolExecutor) ExecuteToolWithID(
+	ctx context.Context,
+	toolName string,
+	args map[string]interface{},
+	workDir string,
+	callback Callback,
+	taskID string,
+) *TaskResult {
+	// 使用传入的 taskID 或生成临时 ID
+	if taskID == "" {
+		taskID = fmt.Sprintf("tool-%d", time.Now().UnixNano())
+	}
+
 	result := &TaskResult{
-		TaskID:    fmt.Sprintf("tool-%d", time.Now().UnixNano()),
+		TaskID:    taskID,
 		StartTime: time.Now(),
 	}
 
@@ -81,14 +122,14 @@ func (e *ToolExecutor) ExecuteTool(
 	// 3. 根据工具名称分发执行
 	switch toolName {
 	case "execute_shell":
-		return e.executeShellTool(ctx, toolDef, args, workDir, callback)
+		return e.executeShellTool(ctx, toolDef, args, workDir, callback, taskID)
 	case "read_file":
-		return e.executeReadFile(ctx, toolDef, args, workDir, callback)
+		return e.executeReadFile(ctx, toolDef, args, workDir, callback, taskID)
 	case "write_file":
-		return e.executeWriteFile(ctx, toolDef, args, workDir, callback)
+		return e.executeWriteFile(ctx, toolDef, args, workDir, callback, taskID)
 	default:
 		// 通用工具执行
-		return e.executeGenericTool(ctx, toolDef, args, workDir, callback)
+		return e.executeGenericTool(ctx, toolDef, args, workDir, callback, taskID)
 	}
 }
 
@@ -99,9 +140,10 @@ func (e *ToolExecutor) executeShellTool(
 	args map[string]interface{},
 	workDir string,
 	callback Callback,
+	taskID string,
 ) *TaskResult {
 	result := &TaskResult{
-		TaskID:    fmt.Sprintf("shell-%d", time.Now().UnixNano()),
+		TaskID:    taskID,
 		StartTime: time.Now(),
 	}
 
@@ -193,9 +235,10 @@ func (e *ToolExecutor) executeReadFile(
 	args map[string]interface{},
 	workDir string,
 	callback Callback,
+	taskID string,
 ) *TaskResult {
 	result := &TaskResult{
-		TaskID:    fmt.Sprintf("read-%d", time.Now().UnixNano()),
+		TaskID:    taskID,
 		StartTime: time.Now(),
 	}
 
@@ -227,10 +270,10 @@ func (e *ToolExecutor) executeReadFile(
 		return result
 	}
 
-	// 检查路径是否在工作目录内
-	if !strings.HasPrefix(absPath, absWorkDir) {
+	// 检查路径是否被允许访问
+	if !e.isPathAllowed(absPath, absWorkDir) {
 		result.Status = models.TaskStatusFailed
-		result.Error = "access denied: path outside work directory"
+		result.Error = "access denied: path outside work directory and allowed paths"
 		result.EndTime = time.Now()
 		return result
 	}
@@ -273,9 +316,10 @@ func (e *ToolExecutor) executeWriteFile(
 	args map[string]interface{},
 	workDir string,
 	callback Callback,
+	taskID string,
 ) *TaskResult {
 	result := &TaskResult{
-		TaskID:    fmt.Sprintf("write-%d", time.Now().UnixNano()),
+		TaskID:    taskID,
 		StartTime: time.Now(),
 	}
 
@@ -309,9 +353,9 @@ func (e *ToolExecutor) executeWriteFile(
 		return result
 	}
 
-	if !strings.HasPrefix(absPath, absWorkDir) {
+	if !e.isPathAllowed(absPath, absWorkDir) {
 		result.Status = models.TaskStatusFailed
-		result.Error = "access denied: path outside work directory"
+		result.Error = "access denied: path outside work directory and allowed paths"
 		result.EndTime = time.Now()
 		return result
 	}
@@ -352,9 +396,10 @@ func (e *ToolExecutor) executeGenericTool(
 	args map[string]interface{},
 	workDir string,
 	callback Callback,
+	taskID string,
 ) *TaskResult {
 	result := &TaskResult{
-		TaskID:    fmt.Sprintf("tool-%d", time.Now().UnixNano()),
+		TaskID:    taskID,
 		StartTime: time.Now(),
 	}
 
@@ -363,17 +408,17 @@ func (e *ToolExecutor) executeGenericTool(
 	// 根据工具处理器类型执行
 	switch toolDef.Handler {
 	case "execute_shell":
-		return e.executeShellTool(ctx, toolDef, args, workDir, callback)
+		return e.executeShellTool(ctx, toolDef, args, workDir, callback, taskID)
 	case "read_file":
-		return e.executeReadFile(ctx, toolDef, args, workDir, callback)
+		return e.executeReadFile(ctx, toolDef, args, workDir, callback, taskID)
 	case "write_file":
-		return e.executeWriteFile(ctx, toolDef, args, workDir, callback)
+		return e.executeWriteFile(ctx, toolDef, args, workDir, callback, taskID)
 	default:
 		// 未知处理器，尝试作为 shell 命令执行
 		if command, ok := args["command"].(string); ok {
 			return e.executeShellTool(ctx, toolDef, map[string]interface{}{
 				"command": command,
-			}, workDir, callback)
+			}, workDir, callback, taskID)
 		}
 
 		result.Status = models.TaskStatusFailed
@@ -420,7 +465,8 @@ func (e *ToolExecutor) ExecuteToolFromTask(task *models.Task, callback Callback)
 		os.MkdirAll(workDir, 0755)
 	}
 
-	return e.ExecuteTool(context.Background(), toolName, args, workDir, callback)
+	// 使用任务的真实ID
+	return e.ExecuteToolWithID(context.Background(), toolName, args, workDir, callback, task.ID)
 }
 
 // SchemaValidator 基于 JSON Schema 的工具验证器

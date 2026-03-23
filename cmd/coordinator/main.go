@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/rs/zerolog/log"
+	sloggin "github.com/samber/slog-gin"
+	"github.com/tp/cowork/internal/coordinator/agent"
 	"github.com/tp/cowork/internal/coordinator/handler"
 	"github.com/tp/cowork/internal/coordinator/middleware"
 	"github.com/tp/cowork/internal/coordinator/scheduler"
@@ -20,6 +24,7 @@ import (
 	"github.com/tp/cowork/internal/coordinator/ws"
 	"github.com/tp/cowork/internal/shared/config"
 	"github.com/tp/cowork/internal/shared/logger"
+	"github.com/tp/cowork/internal/shared/utils"
 )
 
 var upgrader = websocket.Upgrader{
@@ -28,6 +33,56 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // 允许所有来源，生产环境应该限制
 	},
+}
+
+// CoordinatorConfig 协调者配置
+type CoordinatorConfig struct {
+	AIBaseURL string `json:"ai_base_url"`
+	AIModel   string `json:"ai_model"`
+	AIAPIKey  string `json:"ai_api_key"`
+
+	// 调度器配置
+	Scheduler SchedulerConfig `json:"scheduler"`
+}
+
+// SchedulerConfig 调度器配置
+type SchedulerConfig struct {
+	PollInterval     string `json:"poll_interval"`      // 轮询间隔
+	WorkerTimeout    string `json:"worker_timeout"`     // Worker 超时时间
+	MaxRetryAttempts int    `json:"max_retry_attempts"` // 最大重试次数
+	TaskTimeout      string `json:"task_timeout"`       // 任务超时时间
+}
+
+// SettingFile 配置文件结构
+type SettingFile struct {
+	Coordinator CoordinatorConfig `json:"coordinator"`
+}
+
+// loadCoordinatorConfig 从配置文件加载 Coordinator 配置
+func loadCoordinatorConfig(configPath string) CoordinatorConfig {
+	var cfg CoordinatorConfig
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("Failed to read config file", "path", configPath, "error", err)
+		}
+		return cfg
+	}
+
+	var settings SettingFile
+	if err := json.Unmarshal(data, &settings); err != nil {
+		slog.Warn("Failed to parse config file", "path", configPath, "error", err)
+		return cfg
+	}
+
+	cfg = settings.Coordinator
+	if cfg.AIAPIKey != "" {
+		cfg.AIAPIKey = utils.ExpandEnvVars(cfg.AIAPIKey)
+	}
+
+	slog.Info("Loaded coordinator config from file", "ai_model", cfg.AIModel)
+	return cfg
 }
 
 func main() {
@@ -40,10 +95,11 @@ func main() {
 	if logFormat == "" {
 		logFormat = "text"
 	}
-	logger.Configure(logger.Config{
-		Level:  logLevel,
-		Format: logFormat,
-	})
+	logger.Init(logLevel, logFormat)
+
+	// 加载配置文件
+	configPath := config.GetSettingFilePath()
+	coordCfg := loadCoordinatorConfig(configPath)
 
 	// 初始化数据库
 	dbPath := os.Getenv("COWORK_DB_PATH")
@@ -55,24 +111,47 @@ func main() {
 	// 确保数据库目录存在
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
-		log.Fatal().Msgf("Failed to create database directory: %v", err)
+		slog.Error("Failed to create database directory", "error", err)
+		os.Exit(1)
 	}
 
 	s, err := store.New(store.Config{Path: dbPath})
 	if err != nil {
-		log.Fatal().Msgf("Failed to initialize store: %v", err)
+		slog.Error("Failed to initialize store", "error", err)
+		os.Exit(1)
 	}
 	defer s.Close()
 
-	log.Info().Msgf("Database initialized: %s", dbPath)
+	slog.Info("Database initialized", "path", dbPath)
 
 	// 初始化 WebSocket Hub
 	hub := ws.NewHub()
 	go hub.Run()
 
+	// 构建调度器配置
+	schedCfg := scheduler.DefaultConfig()
+	if coordCfg.Scheduler.PollInterval != "" {
+		if d, err := time.ParseDuration(coordCfg.Scheduler.PollInterval); err == nil {
+			schedCfg.PollInterval = d
+		}
+	}
+	if coordCfg.Scheduler.WorkerTimeout != "" {
+		if d, err := time.ParseDuration(coordCfg.Scheduler.WorkerTimeout); err == nil {
+			schedCfg.WorkerTimeout = d
+		}
+	}
+	if coordCfg.Scheduler.MaxRetryAttempts > 0 {
+		schedCfg.MaxRetryAttempts = coordCfg.Scheduler.MaxRetryAttempts
+	}
+	if coordCfg.Scheduler.TaskTimeout != "" {
+		if d, err := time.ParseDuration(coordCfg.Scheduler.TaskTimeout); err == nil {
+			schedCfg.TaskTimeout = d
+		}
+	}
+
 	// 初始化任务调度器
 	taskScheduler := scheduler.New(
-		scheduler.DefaultConfig(),
+		schedCfg,
 		store.NewTaskStore(s.DB()),
 		store.NewWorkerStore(s.DB()),
 		hub,
@@ -83,9 +162,10 @@ func main() {
 	// 初始化工具注册中心
 	toolRegistry := tools.NewRegistry(store.NewToolDefinitionStore(s.DB()))
 	if err := toolRegistry.Initialize(); err != nil {
-		log.Fatal().Msgf("Failed to initialize tool registry: %v", err)
+		slog.Error("Failed to initialize tool registry", "error", err)
+		os.Exit(1)
 	}
-	log.Info().Msgf("Tool registry initialized with %d builtin tools", len(toolRegistry.GetBuiltinTools()))
+	slog.Info("Tool registry initialized", "count", len(toolRegistry.GetBuiltinTools()))
 
 	// 初始化处理器
 	h := handler.NewHandler(
@@ -102,8 +182,59 @@ func main() {
 		toolRegistry,
 	)
 
+	// 从配置文件加载 AI 配置
+	if coordCfg.AIBaseURL != "" && coordCfg.AIModel != "" && coordCfg.AIAPIKey != "" {
+		// 根据配置推断模型类型
+		modelType := "default"
+		if strings.Contains(coordCfg.AIModel, "gpt") || strings.Contains(coordCfg.AIBaseURL, "openai") {
+			modelType = "openai"
+		} else if strings.Contains(coordCfg.AIModel, "claude") || strings.Contains(coordCfg.AIBaseURL, "anthropic") {
+			modelType = "anthropic"
+		} else if strings.Contains(coordCfg.AIModel, "glm") || strings.Contains(coordCfg.AIBaseURL, "bigmodel") || strings.Contains(coordCfg.AIBaseURL, "dashscope") {
+			modelType = "glm"
+		}
+		h.SetAIConfig(modelType, coordCfg.AIBaseURL, coordCfg.AIModel, coordCfg.AIAPIKey)
+		slog.Info("AI config loaded from file", "type", modelType, "model", coordCfg.AIModel)
+
+		// 初始化 ConversationCoordinator（支持 Function Calling）
+		engine := agent.NewFunctionCallingEngine(
+			toolRegistry,
+			store.NewToolExecutionStore(s.DB()),
+			store.NewTaskStore(s.DB()),
+			agent.FunctionCallingConfig{
+				MaxToolRounds: 10,
+				Timeout:       60 * time.Second,
+			},
+		)
+
+		// 创建 Agent 工具调度器（用于 Function Calling 的工具执行）
+		agentToolScheduler := agent.NewToolScheduler(
+			toolRegistry,
+			store.NewToolExecutionStore(s.DB()),
+			store.NewTaskStore(s.DB()),
+			nil, // taskCreator - 暂时不支持远程工具执行
+			10,  // maxConcurrent
+		)
+
+		// 启动工具调度器
+		agentToolScheduler.Start(context.Background())
+		slog.Info("Tool scheduler started")
+
+		coordinator := agent.NewConversationCoordinator(
+			engine,
+			agentToolScheduler,
+			store.NewAgentSessionStore(s.DB()),
+			store.NewToolExecutionStore(s.DB()),
+			toolRegistry,
+		)
+		h.SetAgentCoordinator(coordinator)
+		slog.Info("Agent coordinator initialized with Function Calling support")
+	}
+
 	// 创建 Gin 路由
-	r := gin.Default()
+	r := gin.New()
+	r.Use(sloggin.New(slog.Default()))
+	r.Use(gin.Recovery())
 
 	// CORS 配置
 	corsOrigins := os.Getenv("COWORK_CORS_ORIGINS")
@@ -113,7 +244,7 @@ func main() {
 
 	corsConfig := middleware.DefaultCORSConfig()
 	corsConfig.AllowedOrigins = middleware.ParseOrigins(corsOrigins)
-	log.Info().Msgf("CORS allowed origins: %v", corsConfig.AllowedOrigins)
+	slog.Info("CORS allowed origins", "origins", corsConfig.AllowedOrigins)
 
 	// CORS 中间件
 	r.Use(middleware.CORS(corsConfig))
@@ -121,10 +252,10 @@ func main() {
 	// API 认证配置
 	authConfig := middleware.DefaultAuthConfig()
 	if len(authConfig.APIKeys) > 0 {
-		log.Info().Msgf("API Key authentication enabled with %d keys", len(authConfig.APIKeys))
+		slog.Info("API Key authentication enabled", "count", len(authConfig.APIKeys))
 	}
 	if authConfig.JWTSecret != "" {
-		log.Info().Msg("JWT authentication enabled")
+		slog.Info("JWT authentication enabled")
 	}
 
 	// 健康检查（无需认证）
@@ -136,7 +267,7 @@ func main() {
 	r.GET("/ws", func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
-			log.Warn().Msgf("WebSocket upgrade error: %v", err)
+			slog.Warn("WebSocket upgrade error", "error", err)
 			return
 		}
 
@@ -225,9 +356,10 @@ func main() {
 
 	// 优雅关闭
 	go func() {
-		log.Info().Msgf("Coordinator starting on %s", addr)
+		slog.Info("Coordinator starting", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal().Msgf("Failed to start server: %v", err)
+			slog.Error("Failed to start server", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -236,14 +368,14 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Info().Msg("Shutting down Coordinator...")
+	slog.Info("Shutting down Coordinator...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Warn().Msgf("Server shutdown error: %v", err)
+		slog.Warn("Server shutdown error", "error", err)
 	}
 
-	log.Info().Msg("Coordinator stopped")
+	slog.Info("Coordinator stopped")
 }

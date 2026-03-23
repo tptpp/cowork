@@ -3,12 +3,13 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/tp/cowork/internal/shared/models"
+	"github.com/tp/cowork/internal/shared/utils"
 	"github.com/tp/cowork/internal/coordinator/store"
 	"github.com/tp/cowork/internal/coordinator/ws"
 )
@@ -18,6 +19,7 @@ type Config struct {
 	PollInterval     time.Duration // 轮询间隔
 	WorkerTimeout    time.Duration // Worker 超时时间
 	MaxRetryAttempts int           // 最大重试次数
+	TaskTimeout      time.Duration // 任务超时时间
 }
 
 // DefaultConfig 默认配置
@@ -26,6 +28,7 @@ func DefaultConfig() Config {
 		PollInterval:     2 * time.Second,
 		WorkerTimeout:    30 * time.Second,
 		MaxRetryAttempts: 3,
+		TaskTimeout:      30 * time.Minute,
 	}
 }
 
@@ -34,6 +37,7 @@ type Scheduler struct {
 	config      Config
 	taskStore   store.TaskStore
 	workerStore store.WorkerStore
+	depStore    store.TaskDependencyStore
 	hub         *ws.Hub
 
 	// 运行状态
@@ -57,6 +61,11 @@ func New(cfg Config, taskStore store.TaskStore, workerStore store.WorkerStore, h
 	}
 }
 
+// SetDependencyStore 设置依赖存储
+func (s *Scheduler) SetDependencyStore(depStore store.TaskDependencyStore) {
+	s.depStore = depStore
+}
+
 // Start 启动调度器
 func (s *Scheduler) Start() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -64,7 +73,7 @@ func (s *Scheduler) Start() {
 	s.wg.Add(1)
 	go s.run()
 
-	log.Println("Scheduler started")
+	slog.Info("Scheduler started")
 }
 
 // Stop 停止调度器
@@ -73,7 +82,7 @@ func (s *Scheduler) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
-	log.Println("Scheduler stopped")
+	slog.Info("Scheduler stopped")
 }
 
 // run 主循环
@@ -90,6 +99,7 @@ func (s *Scheduler) run() {
 		case <-ticker.C:
 			s.schedule()
 			s.checkWorkerHealth()
+			s.checkTaskTimeouts()
 		}
 	}
 }
@@ -99,7 +109,7 @@ func (s *Scheduler) schedule() {
 	// 获取待调度的任务
 	pendingTasks, err := s.taskStore.GetByStatus(models.TaskStatusPending)
 	if err != nil {
-		log.Printf("Failed to get pending tasks: %v", err)
+		slog.Error("Failed to get pending tasks", "error", err)
 		return
 	}
 
@@ -110,7 +120,7 @@ func (s *Scheduler) schedule() {
 	// 获取可用 Worker
 	workers, err := s.workerStore.List()
 	if err != nil {
-		log.Printf("Failed to get workers: %v", err)
+		slog.Error("Failed to get workers", "error", err)
 		return
 	}
 
@@ -119,13 +129,30 @@ func (s *Scheduler) schedule() {
 	for _, w := range workers {
 		if w.Status == models.WorkerStatusIdle || w.Status == models.WorkerStatusBusy {
 			// 检查心跳
-			if time.Since(w.LastSeen) < s.config.WorkerTimeout {
+			timeSinceLastSeen := time.Since(w.LastSeen)
+			if timeSinceLastSeen < s.config.WorkerTimeout {
 				onlineWorkers = append(onlineWorkers, w)
+				slog.Debug("Worker is online",
+					"name", w.Name,
+					"tags", w.Tags,
+					"last_seen", w.LastSeen,
+					"time_since", timeSinceLastSeen,
+				)
+			} else {
+				slog.Warn("Worker timed out",
+					"name", w.Name,
+					"last_seen", w.LastSeen,
+					"time_since", timeSinceLastSeen,
+					"timeout", s.config.WorkerTimeout,
+				)
 			}
+		} else {
+			slog.Debug("Worker status is not idle/busy", "name", w.Name, "status", w.Status)
 		}
 	}
 
 	if len(onlineWorkers) == 0 {
+		slog.Debug("No online workers available", "total_workers", len(workers))
 		return
 	}
 
@@ -138,13 +165,124 @@ func (s *Scheduler) schedule() {
 			continue // 已分配
 		}
 
+		// 检查依赖是否满足
+		if !s.checkDependencies(&task) {
+			continue
+		}
+
 		worker := s.selectWorker(task, onlineWorkers)
 		if worker == nil {
-			log.Printf("No suitable worker found for task %s (required tags: %v)", task.ID, task.RequiredTags)
+			slog.Warn("No suitable worker found for task",
+				"task_id", utils.TruncateID(task.ID, 8),
+				"required_tags", task.RequiredTags,
+			)
 			continue
 		}
 
 		s.assignTask(&task, worker)
+	}
+}
+
+// checkDependencies 检查任务依赖是否满足
+func (s *Scheduler) checkDependencies(task *models.Task) bool {
+	if s.depStore == nil {
+		return true
+	}
+
+	deps, err := s.depStore.GetByTaskID(task.ID)
+	if err != nil {
+		slog.Error("Failed to get dependencies for task",
+			"task_id", utils.TruncateID(task.ID, 8),
+			"error", err,
+		)
+		return false
+	}
+
+	if len(deps) == 0 {
+		return true
+	}
+
+	for _, dep := range deps {
+		if !dep.IsSatisfied {
+			// 获取依赖的任务状态
+			depTask, err := s.taskStore.Get(dep.DependsOnTaskID)
+			if err != nil {
+				continue
+			}
+
+			// 根据依赖类型检查是否满足
+			satisfied := false
+			switch dep.Type {
+			case models.DependencyTypeFinish:
+				// 任务完成即可（成功或失败）
+				satisfied = depTask.Status == models.TaskStatusCompleted ||
+					depTask.Status == models.TaskStatusFailed ||
+					depTask.Status == models.TaskStatusCancelled
+			case models.DependencyTypeSuccess:
+				// 任务必须成功
+				satisfied = depTask.Status == models.TaskStatusCompleted
+			case models.DependencyTypeFailure:
+				// 任务必须失败
+				satisfied = depTask.Status == models.TaskStatusFailed
+			}
+
+			if satisfied {
+				// 标记依赖已满足
+				s.depStore.MarkSatisfied(dep.ID)
+			} else {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// checkTaskTimeouts 检查任务超时
+func (s *Scheduler) checkTaskTimeouts() {
+	runningTasks, err := s.taskStore.GetByStatus(models.TaskStatusRunning)
+	if err != nil {
+		return
+	}
+
+	for _, task := range runningTasks {
+		if task.StartedAt == nil {
+			continue
+		}
+
+		// 使用任务配置的超时时间，如果没有配置则使用默认值
+		timeout := time.Duration(task.Timeout) * time.Second
+		if timeout <= 0 {
+			timeout = s.config.TaskTimeout
+		}
+
+		if time.Since(*task.StartedAt) > timeout {
+			slog.Warn("Task timed out", "task_id", task.ID, "timeout", timeout)
+
+			errMsg := "Task timed out"
+			task.Status = models.TaskStatusFailed
+			task.Error = &errMsg
+			now := time.Now()
+			task.CompletedAt = &now
+
+			if err := s.taskStore.Update(&task); err != nil {
+				slog.Error("Failed to mark task as timed out",
+					"task_id", task.ID,
+					"error", err,
+				)
+			} else {
+				// 更新 Worker 负载
+				if task.WorkerID != nil {
+					s.mu.Lock()
+					if s.workerLoad[*task.WorkerID] > 0 {
+						s.workerLoad[*task.WorkerID]--
+					}
+					s.mu.Unlock()
+				}
+
+				s.broadcastTaskUpdate(&task, "timeout")
+			}
+		}
 	}
 }
 
@@ -176,14 +314,36 @@ func (s *Scheduler) sortTasksByPriority(tasks []models.Task) {
 func (s *Scheduler) selectWorker(task models.Task, workers []models.Worker) *models.Worker {
 	var candidates []models.Worker
 
+	slog.Debug("selectWorker: checking workers for task",
+		"task_id", utils.TruncateID(task.ID, 8),
+		"required_tags", task.RequiredTags,
+		"worker_count", len(workers),
+	)
+
 	// 1. 标签匹配
 	for _, worker := range workers {
 		if s.matchTags(task.RequiredTags, worker.Tags) {
 			// 检查并发限制
 			currentLoad := s.getWorkerLoad(worker.ID)
 			if currentLoad < worker.MaxConcurrent {
+				slog.Debug("selectWorker: worker matched",
+					"worker_name", worker.Name,
+					"load", currentLoad,
+					"max_concurrent", worker.MaxConcurrent,
+				)
 				candidates = append(candidates, worker)
+			} else {
+				slog.Debug("selectWorker: worker at max capacity",
+					"worker_name", worker.Name,
+					"load", currentLoad,
+					"max_concurrent", worker.MaxConcurrent,
+				)
 			}
+		} else {
+			slog.Debug("selectWorker: worker tags do not match",
+				"worker_name", worker.Name,
+				"worker_tags", worker.Tags,
+			)
 		}
 	}
 
@@ -252,7 +412,11 @@ func (s *Scheduler) assignTask(task *models.Task, worker *models.Worker) {
 	task.StartedAt = &now
 
 	if err := s.taskStore.Update(task); err != nil {
-		log.Printf("Failed to assign task %s to worker %s: %v", task.ID, worker.ID, err)
+		slog.Error("Failed to assign task to worker",
+			"task_id", task.ID,
+			"worker_id", worker.ID,
+			"error", err,
+		)
 		return
 	}
 
@@ -261,7 +425,11 @@ func (s *Scheduler) assignTask(task *models.Task, worker *models.Worker) {
 	s.workerLoad[worker.ID]++
 	s.mu.Unlock()
 
-	log.Printf("Task %s assigned to worker %s (%s)", task.ID, worker.ID, worker.Name)
+	slog.Info("Task assigned to worker",
+		"task_id", task.ID,
+		"worker_id", worker.ID,
+		"worker_name", worker.Name,
+	)
 
 	// 广播任务状态更新
 	s.broadcastTaskUpdate(task, "assigned")
@@ -284,7 +452,7 @@ func (s *Scheduler) broadcastTaskUpdate(task *models.Task, event string) {
 
 	data, err := json.Marshal(update)
 	if err != nil {
-		log.Printf("Failed to marshal task update: %v", err)
+		slog.Error("Failed to marshal task update", "error", err)
 		return
 	}
 
@@ -303,7 +471,7 @@ func (s *Scheduler) checkWorkerHealth() {
 		// 检查心跳超时
 		if worker.Status != models.WorkerStatusOffline {
 			if time.Since(worker.LastSeen) > s.config.WorkerTimeout {
-				log.Printf("Worker %s timed out, marking offline", worker.ID)
+				slog.Warn("Worker timed out, marking offline", "worker_id", worker.ID)
 
 				// 更新 Worker 状态
 				worker.Status = models.WorkerStatusOffline
@@ -339,9 +507,9 @@ func (s *Scheduler) handleWorkerFailure(worker *models.Worker) {
 			task.Error = &errMsg
 
 			if err := s.taskStore.Update(&task); err != nil {
-				log.Printf("Failed to reset task %s: %v", task.ID, err)
+				slog.Error("Failed to reset task", "task_id", task.ID, "error", err)
 			} else {
-				log.Printf("Task %s reset to pending due to worker failure", task.ID)
+				slog.Info("Task reset to pending due to worker failure", "task_id", task.ID)
 			}
 
 			// 清除负载计数
@@ -421,10 +589,13 @@ func (s *Scheduler) CompleteTask(taskID string, output models.JSON) error {
 		}
 	}
 
-	log.Printf("Task %s completed", taskID)
+	slog.Info("Task completed", "task_id", taskID)
 
 	// 广播完成
 	s.broadcastTaskUpdate(task, "completed")
+
+	// 更新依赖此任务的依赖关系
+	s.updateDependentTasks(task)
 
 	return nil
 }
@@ -434,6 +605,11 @@ func (s *Scheduler) FailTask(taskID string, errMsg string) error {
 	task, err := s.taskStore.Get(taskID)
 	if err != nil {
 		return err
+	}
+
+	// 检查是否应该重试
+	if task.RetryOnFailure && task.RetryCount < task.MaxRetries {
+		return s.retryTask(task, errMsg)
 	}
 
 	now := time.Now()
@@ -461,12 +637,79 @@ func (s *Scheduler) FailTask(taskID string, errMsg string) error {
 		}
 	}
 
-	log.Printf("Task %s failed: %s", taskID, errMsg)
+	slog.Warn("Task failed", "task_id", taskID, "error", errMsg)
 
 	// 广播失败
 	s.broadcastTaskUpdate(task, "failed")
 
+	// 更新依赖此任务的依赖关系
+	s.updateDependentTasks(task)
+
 	return nil
+}
+
+// retryTask 重试任务
+func (s *Scheduler) retryTask(task *models.Task, errMsg string) error {
+	// 先保存 workerID（在设置为 nil 之前）
+	var workerIDToRelease *string
+	if task.WorkerID != nil {
+		workerIDCopy := *task.WorkerID
+		workerIDToRelease = &workerIDCopy
+	}
+
+	task.RetryCount++
+	task.Status = models.TaskStatusPending
+	task.WorkerID = nil
+	task.StartedAt = nil
+	task.Error = &errMsg
+
+	slog.Info("Retrying task",
+		"task_id", task.ID,
+		"attempt", task.RetryCount,
+		"max_retries", task.MaxRetries,
+	)
+
+	if err := s.taskStore.Update(task); err != nil {
+		return err
+	}
+
+	// 更新 Worker 负载（使用保存的 workerID）
+	if workerIDToRelease != nil {
+		s.mu.Lock()
+		if s.workerLoad[*workerIDToRelease] > 0 {
+			s.workerLoad[*workerIDToRelease]--
+		}
+		s.mu.Unlock()
+	}
+
+	s.broadcastTaskUpdate(task, "retry")
+
+	return nil
+}
+
+// updateDependentTasks 更新依赖此任务的其他任务
+func (s *Scheduler) updateDependentTasks(task *models.Task) {
+	if s.depStore == nil {
+		return
+	}
+
+	deps, err := s.depStore.GetDependents(task.ID)
+	if err != nil {
+		return
+	}
+
+	for _, dep := range deps {
+		if dep.Type == models.DependencyTypeFailure && task.Status == models.TaskStatusFailed {
+			// 如果是失败依赖，标记为满足
+			s.depStore.MarkSatisfied(dep.ID)
+		} else if dep.Type == models.DependencyTypeSuccess && task.Status == models.TaskStatusCompleted {
+			// 如果是成功依赖，标记为满足
+			s.depStore.MarkSatisfied(dep.ID)
+		} else if dep.Type == models.DependencyTypeFinish {
+			// 完成依赖，无论成功失败都满足
+			s.depStore.MarkSatisfied(dep.ID)
+		}
+	}
 }
 
 // GetSchedulerStats 获取调度器统计
@@ -476,5 +719,16 @@ func (s *Scheduler) GetSchedulerStats() map[string]interface{} {
 
 	return map[string]interface{}{
 		"worker_load": s.workerLoad,
+	}
+}
+
+// ReleaseWorkerLoad 释放 Worker 负载（用于外部更新任务状态时调用）
+func (s *Scheduler) ReleaseWorkerLoad(workerID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.workerLoad[workerID] > 0 {
+		s.workerLoad[workerID]--
+		slog.Debug("Released worker load", "worker_id", workerID, "new_load", s.workerLoad[workerID])
 	}
 }

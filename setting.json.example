@@ -1,0 +1,38 @@
+{
+  "worker": {
+    "dev-worker": {
+      "ai_base_url": "https://api.openai.com/v1",
+      "ai_model": "gpt-4",
+      "ai_api_key": "${AI_API_KEY}",
+      "tags": ["coding", "dev"],
+      "system_prompt": "You are a developer agent. Your role is to help with software development tasks including coding, debugging, and file management. Always be precise and thorough in your work.",
+      "description": "负责代码开发任务。需要提供：1) 具体的开发需求描述 2) 现有代码路径（如有）"
+    },
+    "test-worker": {
+      "ai_base_url": "https://api.openai.com/v1",
+      "ai_model": "gpt-4",
+      "ai_api_key": "${AI_API_KEY}",
+      "tags": ["testing", "qa"],
+      "system_prompt": "You are a QA testing agent. Your role is to help with testing tasks including test case design, test execution, and bug reporting.",
+      "description": "负责测试任务。需要提供：1) 测试目标 2) 相关文件路径"
+    },
+    "general-worker": {
+      "ai_base_url": "https://api.moonshot.cn/v1",
+      "ai_model": "moonshot-v1-8k",
+      "ai_api_key": "${MOONSHOT_API_KEY}",
+      "tags": ["general", "assistant"],
+      "description": "通用助手，可以处理各种任务"
+    }
+  },
+  "coordinator": {
+    "ai_base_url": "https://api.openai.com/v1",
+    "ai_model": "gpt-4",
+    "ai_api_key": "${AI_API_KEY}",
+    "scheduler": {
+      "poll_interval": "2s",
+      "worker_timeout": "30s",
+      "max_retry_attempts": 3,
+      "task_timeout": "30m"
+    }
+  }
+}

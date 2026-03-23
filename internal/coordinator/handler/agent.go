@@ -29,6 +29,7 @@ type AgentHandler struct {
 	fileStore     store.TaskFileStore
 	registry      *tools.Registry
 	coordinator   *agent.ConversationCoordinator
+	modelRouter   *ModelRouter // 模型路由
 }
 
 // NewAgentHandler 创建 Agent 处理器
@@ -45,7 +46,13 @@ func NewAgentHandler(
 		taskStore:     taskStore,
 		fileStore:     fileStore,
 		registry:      registry,
+		modelRouter:   NewModelRouter(), // 默认从环境变量加载
 	}
+}
+
+// SetModelRouter 设置模型路由
+func (h *AgentHandler) SetModelRouter(router *ModelRouter) {
+	h.modelRouter = router
 }
 
 // SetCoordinator 设置协调器
@@ -76,6 +83,22 @@ func NewModelRouter() *ModelRouter {
 	// 加载环境变量配置
 	router.loadFromEnv()
 	return router
+}
+
+// LoadFromConfig 从外部配置加载模型配置
+func (r *ModelRouter) LoadFromConfig(modelType, baseURL, model, apiKey string) {
+	if baseURL != "" && model != "" && apiKey != "" {
+		r.configs[modelType] = ModelConfig{
+			Type:    modelType,
+			APIKey:  apiKey,
+			BaseURL: baseURL,
+			Model:   model,
+		}
+		// 同时设置为默认模型（如果还没有默认）
+		if _, ok := r.configs["default"]; !ok {
+			r.configs["default"] = r.configs[modelType]
+		}
+	}
 }
 
 // loadFromEnv 从环境变量加载模型配置
@@ -281,8 +304,7 @@ func (h *AgentHandler) SendAgentMessage(c *gin.Context) {
 	c.Header("Access-Control-Allow-Origin", "*")
 
 	// 调用模型路由进行流式响应
-	router := NewModelRouter()
-	fullResponse, err := h.streamChat(c, router, session.Model, messages, session.SystemPrompt)
+	fullResponse, err := h.streamChat(c, h.modelRouter, session.Model, messages, session.SystemPrompt)
 	if err != nil {
 		c.SSEvent("message", StreamResponse{Type: "error", Content: err.Error()})
 		c.Writer.Flush()
@@ -664,8 +686,7 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 	c.Header("Access-Control-Allow-Origin", "*")
 
 	// 获取模型配置
-	router := NewModelRouter()
-	cfg, ok := router.GetConfig(session.Model)
+	cfg, ok := h.modelRouter.GetConfig(session.Model)
 	if !ok {
 		// 没有配置，使用模拟响应
 		h.mockStreamResponseWithTools(c, session.Model, req.Content)
@@ -676,6 +697,12 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 	if h.coordinator == nil {
 		h.streamWithoutFunctionCalling(c, session, cfg, content)
 		return
+	}
+
+	// 获取工具列表：如果用户没有指定，使用所有可用工具
+	toolNames := req.Tools
+	if len(toolNames) == 0 {
+		toolNames = h.registry.GetToolNames()
 	}
 
 	// 使用协调器处理 (支持 Function Calling)
@@ -694,7 +721,7 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 			BaseURL: cfg.BaseURL,
 			Model:   cfg.Model,
 		},
-		req.Tools,
+		toolNames,
 		onToken,
 	)
 
@@ -740,8 +767,7 @@ func (h *AgentHandler) streamWithoutFunctionCalling(c *gin.Context, session *mod
 	}
 
 	// 调用模型
-	router := NewModelRouter()
-	fullResponse, err := h.streamChat(c, router, session.Model, messages, session.SystemPrompt)
+	fullResponse, err := h.streamChat(c, h.modelRouter, session.Model, messages, session.SystemPrompt)
 	if err != nil {
 		c.SSEvent("message", StreamResponse{Type: "error", Content: err.Error()})
 		c.Writer.Flush()

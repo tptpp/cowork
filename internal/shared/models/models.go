@@ -153,6 +153,15 @@ type Task struct {
 	// 配置
 	Config JSON `gorm:"type:text" json:"config"`
 
+	// 重试配置
+	MaxRetries    int `gorm:"default:3" json:"max_retries"`      // 最大重试次数
+	RetryCount    int `gorm:"default:0" json:"retry_count"`      // 当前重试次数
+	RetryDelay    int `gorm:"default:60" json:"retry_delay"`     // 重试延迟（秒）
+	RetryOnFailure bool `gorm:"default:true" json:"retry_on_failure"` // 失败时是否重试
+
+	// 超时配置
+	Timeout int `gorm:"default:1800" json:"timeout"` // 超时时间（秒），默认 30 分钟
+
 	// 工作目录
 	WorkDir string `gorm:"type:varchar(255)" json:"work_dir"`
 
@@ -243,6 +252,9 @@ type Worker struct {
 	// 能力
 	Capabilities JSON `gorm:"type:text" json:"capabilities"`
 	// 示例: { "docker": true, "gpu": false, "work_dir": "/tmp/cowork" }
+
+	// 描述（告诉协调者何时分配任务、需要什么信息）
+	Description string `gorm:"type:text" json:"description"`
 
 	// 元数据
 	Metadata JSON `gorm:"type:text" json:"metadata"`
@@ -595,4 +607,13 @@ type TaskStatusInfo struct {
 	Progress     int        `json:"progress"`
 	Dependencies []string   `json:"dependencies,omitempty"`
 	CanBeStarted bool       `json:"can_be_started"`
+}
+
+// ========== Worker Agent 任务输入 ==========
+
+// AgentInput Agent 任务输入结构
+type AgentInput struct {
+	Prompt  string   `json:"prompt"`            // 任务提示词（必需）
+	Files   []string `json:"files,omitempty"`   // 相关文件路径
+	Context string   `json:"context,omitempty"` // 额外上下文
 }

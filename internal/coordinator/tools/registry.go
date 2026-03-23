@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/google/uuid"
@@ -155,6 +156,19 @@ func (r *Registry) GetBuiltinTools() []*models.ToolDefinition {
 	}
 
 	return builtinTools
+}
+
+// GetToolNames 获取所有工具名称列表（按字母排序）
+func (r *Registry) GetToolNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0, len(r.cache))
+	for name := range r.cache {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Update 更新工具定义

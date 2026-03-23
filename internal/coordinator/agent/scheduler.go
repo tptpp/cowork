@@ -320,19 +320,18 @@ func (s *ToolScheduler) createRemoteTask(execution *models.ToolExecution) (*mode
 	}
 
 	// 根据工具类别设置所需标签
+	// 注意：标签需要与 Worker capabilities 匹配
 	switch toolDef.Category {
 	case models.ToolCategorySystem:
 		task.RequiredTags = []string{"shell"}
 	case models.ToolCategoryFile:
-		task.RequiredTags = []string{"filesystem"}
+		task.RequiredTags = []string{"file"} // 匹配 Worker 的 "file" capability
 	case models.ToolCategoryWeb:
 		task.RequiredTags = []string{"network"}
 	}
 
-	// 根据权限设置隔离要求
-	if toolDef.Permission == models.ToolPermissionExecute {
-		task.RequiredTags = append(task.RequiredTags, "isolated")
-	}
+	// 只有高权限操作才需要额外检查
+	// 不再自动添加 "isolated" 要求，让 Worker 自己处理安全隔离
 
 	// 保存任务
 	if err := s.taskStore.Create(task); err != nil {
