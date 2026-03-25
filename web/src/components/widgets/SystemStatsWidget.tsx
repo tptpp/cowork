@@ -59,7 +59,7 @@ export function SystemStatsWidget() {
 
   return (
     <div className="h-full flex flex-col p-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         {statItems.map((item) => (
           <div
             key={item.title}
@@ -69,15 +69,15 @@ export function SystemStatsWidget() {
             )}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-xs font-medium text-muted-foreground truncate">
                 {item.title}
               </span>
-              <div className={cn('p-1.5 rounded-lg', item.bg)}>
+              <div className={cn('p-1.5 rounded-lg shrink-0', item.bg)}>
                 <item.icon className={cn('h-3.5 w-3.5', item.color)} />
               </div>
             </div>
-            <div className="text-xl font-bold">{item.value}</div>
-            <p className="text-xs text-muted-foreground mt-0.5">{item.subtext}</p>
+            <div className="text-xl font-bold truncate">{item.value}</div>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{item.subtext}</p>
           </div>
         ))}
       </div>

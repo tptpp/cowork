@@ -64,7 +64,7 @@ export function Sidebar({ activeId, onSelect }: SidebarProps) {
   return (
     <aside
       className={cn(
-        'h-screen sticky top-0 flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300',
+        'h-full min-h-screen sticky top-0 flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300',
         collapsed ? 'w-16' : 'w-56'
       )}
     >
@@ -111,10 +111,10 @@ export function Sidebar({ activeId, onSelect }: SidebarProps) {
 
       {/* Footer */}
       {!collapsed && (
-        <div className="p-3 border-t border-sidebar-border">
-          <div className="text-xs text-sidebar-foreground/50 text-center">
+        <div className="p-3 border-t border-sidebar-border shrink-0 min-h-[48px] flex items-center justify-center">
+          <span className="text-xs text-sidebar-foreground/50 text-center">
             Distributed Task Processing
-          </div>
+          </span>
         </div>
       )}
     </aside>

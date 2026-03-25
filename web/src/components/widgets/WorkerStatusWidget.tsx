@@ -51,7 +51,8 @@ export function WorkerStatusWidget({ onSelectWorker }: WorkerStatusWidgetProps) 
           <Server className="w-6 h-6 opacity-50" />
         </div>
         <p className="text-sm font-medium">No workers</p>
-        <p className="text-xs text-muted-foreground">No workers registered</p>
+        <p className="text-xs text-muted-foreground mb-3">Start a worker to begin processing tasks</p>
+        <code className="text-xs bg-muted px-2 py-1 rounded font-mono">./worker</code>
       </div>
     )
   }

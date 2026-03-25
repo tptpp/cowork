@@ -38,12 +38,20 @@ import 'react-resizable/css/styles.css'
 type ViewMode = 'dashboard' | 'tasks' | 'settings'
 
 // Widget renderer component
-function WidgetRenderer({ widget, onSelectTask }: { widget: WidgetConfig; onSelectTask: (task: Task) => void }) {
+function WidgetRenderer({ 
+  widget, 
+  onSelectTask,
+  onCreateTask 
+}: { 
+  widget: WidgetConfig; 
+  onSelectTask: (task: Task) => void;
+  onCreateTask: () => void;
+}) {
   switch (widget.type) {
     case 'system-stats':
       return <SystemStatsWidget />
     case 'task-queue':
-      return <TaskQueueWidget onSelectTask={onSelectTask} />
+      return <TaskQueueWidget onSelectTask={onSelectTask} onCreateTask={onCreateTask} />
     case 'worker-status':
       return <WorkerStatusWidget />
     case 'agent-chat':
@@ -189,6 +197,7 @@ export function Dashboard() {
                 size="sm"
                 onClick={() => setViewMode('dashboard')}
                 className="gap-1.5 rounded-md"
+                title="Dashboard view"
               >
                 <LayoutDashboard className="w-4 h-4" />
                 <span className="hidden sm:inline">Dashboard</span>
@@ -198,6 +207,7 @@ export function Dashboard() {
                 size="sm"
                 onClick={() => setViewMode('tasks')}
                 className="gap-1.5 rounded-md"
+                title="Tasks list view"
               >
                 <List className="w-4 h-4" />
                 <span className="hidden sm:inline">Tasks</span>
@@ -224,6 +234,7 @@ export function Dashboard() {
                   size="sm"
                   onClick={toggleEditing}
                   className="gap-1.5"
+                  title={isEditing ? 'Finish editing' : 'Edit dashboard layout'}
                 >
                   <Settings className="w-4 h-4" />
                   {isEditing ? 'Done' : 'Edit'}
@@ -236,6 +247,7 @@ export function Dashboard() {
                       size="sm"
                       onClick={() => setShowWidgetStore(true)}
                       className="gap-1.5"
+                      title="Add widget"
                     >
                       <Plus className="w-4 h-4" />
                       Widget
@@ -245,6 +257,7 @@ export function Dashboard() {
                       size="sm"
                       onClick={resetToDefault}
                       className="gap-1.5"
+                      title="Reset layout"
                     >
                       <RotateCcw className="w-4 h-4" />
                     </Button>
@@ -282,7 +295,7 @@ export function Dashboard() {
               {widgets.map((widget) => (
                 <div key={widget.id} className="overflow-hidden">
                   <WidgetWrapper widget={widget}>
-                    <WidgetRenderer widget={widget} onSelectTask={handleSelectTask} />
+                    <WidgetRenderer widget={widget} onSelectTask={handleSelectTask} onCreateTask={() => setShowTaskForm(true)} />
                   </WidgetWrapper>
                 </div>
               ))}

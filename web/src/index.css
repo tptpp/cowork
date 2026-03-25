@@ -251,3 +251,15 @@ html {
 html {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
+
+/* React Grid Layout fixes */
+.react-grid-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.react-grid-item > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}

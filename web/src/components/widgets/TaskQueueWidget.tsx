@@ -1,14 +1,16 @@
-import { Loader2, Clock, Zap } from 'lucide-react'
+import { Loader2, Clock, Zap, Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { useTaskStore } from '@/stores/taskStore'
 import type { Task } from '@/types'
 import { cn } from '@/lib/utils'
 
 interface TaskQueueWidgetProps {
   onSelectTask?: (task: Task) => void
+  onCreateTask?: () => void
 }
 
-export function TaskQueueWidget({ onSelectTask }: TaskQueueWidgetProps) {
+export function TaskQueueWidget({ onSelectTask, onCreateTask }: TaskQueueWidgetProps) {
   const { tasks } = useTaskStore()
 
   // Filter running and pending tasks
@@ -23,7 +25,13 @@ export function TaskQueueWidget({ onSelectTask }: TaskQueueWidgetProps) {
           <Clock className="w-6 h-6 opacity-50" />
         </div>
         <p className="text-sm font-medium">No active tasks</p>
-        <p className="text-xs text-muted-foreground">Queue is empty</p>
+        <p className="text-xs text-muted-foreground mb-3">Queue is empty</p>
+        {onCreateTask && (
+          <Button size="sm" variant="outline" onClick={onCreateTask} className="gap-1.5">
+            <Plus className="w-4 h-4" />
+            Create Task
+          </Button>
+        )}
       </div>
     )
   }

@@ -43,11 +43,12 @@ export function MenuItem({
     <div>
       <button
         onClick={handleClick}
+        style={isActive && !hasChildren ? { backgroundColor: 'rgba(139, 92, 246, 0.3)' } : undefined}
         className={cn(
-          'w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors',
-          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          'w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors relative',
+          'hover:bg-white/10',
           isActive && !hasChildren
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+            ? 'text-white font-medium border-l-2 border-violet-400 -ml-[2px] pl-[calc(0.75rem+2px)]'
             : 'text-sidebar-foreground/80',
           level > 0 && 'ml-4 text-xs py-2'
         )}

@@ -38,3 +38,9 @@ Thumbs.db
 .env
 .env.local
 .env.*.local/coordinator
+
+# Test artifacts
+tests/screenshots/
+*.png
+*.jpg
+*.jpeg
