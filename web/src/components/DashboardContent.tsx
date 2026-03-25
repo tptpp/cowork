@@ -149,7 +149,7 @@ export function DashboardContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
+    <div className="bg-gradient-to-br from-background via-background to-muted/20">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
         <div className="flex h-16 items-center justify-between px-6">
