@@ -1,6 +1,6 @@
 # Cowork 功能完成度分析报告
 
-**分析日期**: 2026-03-21 (最后验证: 2026-03-21 20:16)
+**分析日期**: 2026-04-15 (最后验证: 2026-04-15 17:10)
 
 ## 功能完成度清单
 
@@ -30,6 +30,19 @@
 | | 标签匹配调度 | ✅ | Scheduler 完整实现 |
 | | 故障转移 | ✅ | 心跳超时后重新分配任务 |
 | | 资源使用监控 | ⚠️ | 有字段但未在 UI 展示 |
+| **场景六：Agent 协作** | Agent 间通信 | ✅ | MessageRouter + Agent Message Widget |
+| | 消息类型 | ✅ | notify/question/data/request_approval |
+| | Recovery Agent | ✅ | proxy_for 身份声明机制 |
+| **场景七：审批系统** | 分级审批 | ✅ | 低/中/高风险自动超时机制 |
+| | 审批队列 | ✅ | ApprovalWidget + 实时更新 |
+| | 审批策略 | ✅ | ApprovalPolicy 可配置 |
+| **场景八：节点管理** | 节点注册 | ✅ | NodeRegistry + 心跳机制 |
+| | 能力匹配调度 | ✅ | NodeScheduler 基于 capabilities 分配 |
+| | 节点状态监控 | ✅ | NodeStatusWidget 实时显示 |
+| **场景九：任务树** | 任务拆解 | ✅ | TaskDecomposer 自动拆解复杂请求 |
+| | 依赖关系 | ✅ | TaskDependency + DependencyManager |
+| | 进度追踪 | ✅ | ProgressTracker + Task Tree Widget |
+| | 继承链 | ✅ | root_id + parent_id + template_id |
 
 ## 核心功能检查
 
@@ -42,22 +55,33 @@
 | 任务取消 | ✅ | DELETE /api/tasks/:id |
 | 任务状态更新 | ✅ | Worker 调用 PUT /api/tasks/:id/status |
 | 任务日志 | ✅ | 创建和查询 |
+| 任务树可视化 | ✅ | TaskTreeView 组件 |
+| 任务依赖管理 | ✅ | TaskDependency + DependencyManager |
+| 任务拆解 | ✅ | TaskDecomposer 自动拆解 |
 | **调度系统** | | |
 | 优先级调度 | ✅ | high/medium/low |
 | 标签匹配 | ✅ | required_tags 精确匹配 |
 | 负载均衡 | ✅ | 选择负载最低的 Worker |
 | 故障转移 | ✅ | 30秒心跳超时后重新分配 |
+| 节点能力调度 | ✅ | NodeScheduler 基于 capabilities |
 | **Worker 系统** | | |
 | Worker 注册 | ✅ | POST /api/workers/register |
 | Worker 心跳 | ✅ | 5秒间隔，状态同步 |
 | Worker 列表 | ✅ | 状态筛选 |
 | Worker 注销 | ✅ | DELETE /api/workers/:id |
 | 并发控制 | ✅ | max_concurrent 配置 |
+| **节点系统** | | |
+| 节点注册 | ✅ | POST /api/nodes/register |
+| 节点心跳 | ✅ | 定期心跳更新 lastSeen |
+| 节点状态 | ✅ | idle/busy/offline |
+| 能力标签 | ✅ | browser/gpu/docker 等 |
 | **实时推送** | | |
 | WebSocket Hub | ✅ | 频道订阅机制 |
 | 任务状态推送 | ✅ | tasks 频道 |
 | Worker 状态推送 | ✅ | workers 频道 |
 | 通知推送 | ✅ | notifications 频道 |
+| 节点状态推送 | ✅ | node_update |
+| 工具执行推送 | ✅ | tool_execution_update |
 | **Agent Chat** | | |
 | 会话管理 | ✅ | CRUD 完整 |
 | 多模型路由 | ✅ | OpenAI/Anthropic/GLM |
@@ -65,6 +89,21 @@
 | 历史消息 | ✅ | SQLite 持久化 |
 | Function Calling | ✅ | 完整工具执行系统 |
 | 模拟响应 | ✅ | 无 API Key 时的备用 |
+| **Agent 协作** | | |
+| 消息路由 | ✅ | MessageRouter |
+| 消息类型 | ✅ | notify/question/data/request_approval |
+| 离线消息 | ✅ | 保存等待上线推送 |
+| Recovery Agent | ✅ | proxy_for 代理身份 |
+| **审批系统** | | |
+| 审批请求创建 | ✅ | POST /api/approvals |
+| 分级审批 | ✅ | 低/中/高风险 + 自动超时 |
+| 审批队列 | ✅ | GET /api/approvals/pending |
+| 审批批准/拒绝 | ✅ | POST /api/approvals/:id/approve |
+| 审批策略 | ✅ | ApprovalPolicy 配置 |
+| **Agent 模板** | | |
+| 系统模板 | ✅ | 6个预置模板 (Coordinator, Developer 等) |
+| 模板列表 | ✅ | GET /api/agent/templates |
+| 模板查询 | ✅ | GET /api/agent/templates/:id |
 | **Dashboard** | | |
 | 可拖拽布局 | ✅ | react-grid-layout |
 | 响应式网格 | ✅ | 12/10/6/4/2 列 |
@@ -103,13 +142,22 @@
 - WebSocket: 实时状态推送，频道订阅机制
 - Agent: 多模型 AI 对话，SSE 流式响应，Function Calling 支持
 - Tools: 完整的工具注册、验证、执行系统
+- MessageRouter: Agent 间通信路由，支持离线消息
+- NodeRegistry: 节点注册和能力调度
+- ApprovalService: 分级审批系统，自动超时机制
+- TemplateManager: Agent 模板管理，6个系统预置模板
+- TaskDecomposer: 任务自动拆解，依赖管理
 
 **前端 (React)**:
 - Dashboard: 可拖拽布局，响应式设计，布局持久化
 - 任务管理: 列表、详情、创建、取消
 - Agent Chat: 多模型对话，流式显示，会话管理
-- 实时更新: WebSocket 集成，任务/Worker 状态实时刷新
+- 实时更新: WebSocket 集成，任务/Worker/节点状态实时刷新
 - 通知中心: 任务完成/失败通知
+- Approval Widget: 审批队列，风险分级显示
+- Node Status Widget: 节点状态和能力的实时显示
+- Agent Message Widget: Agent 间通信可视化
+- Task Tree Widget: 任务依赖和继承链可视化
 
 ### 已知限制
 
@@ -139,12 +187,16 @@
 
 | 类别 | 已完成 | 部分完成 | 未实现 | 完成率 |
 |------|--------|----------|--------|--------|
-| 场景一 | 5/5 | 0 | 0 | 100% |
-| 场景二 | 6/6 | 0 | 0 | 100% |
-| 场景三 | 4/4 | 0 | 0 | 100% |
-| 场景四 | 4/4 | 0 | 0 | 100% |
-| 场景五 | 4/5 | 1 | 0 | 80% |
-| **总计** | **23/24** | **1** | **0** | **96%** |
+| 场景一：批量代码分析 | 5/5 | 0 | 0 | 100% |
+| 场景二：AI 辅助编程 | 6/6 | 0 | 0 | 100% |
+| 场景三：Docker 容器任务 | 4/4 | 0 | 0 | 100% |
+| 场景四：个性化工作台 | 4/4 | 0 | 0 | 100% |
+| 场景五：Worker 集群管理 | 4/5 | 1 | 0 | 80% |
+| 场景六：Agent 协作 | 3/3 | 0 | 0 | 100% |
+| 场景七：审批系统 | 3/3 | 0 | 0 | 100% |
+| 场景八：节点管理 | 3/3 | 0 | 0 | 100% |
+| 场景九：任务树 | 4/4 | 0 | 0 | 100% |
+| **总计** | **36/37** | **1** | **0** | **97%** |
 
 ## 下一步建议
 
@@ -180,4 +232,4 @@
 
 ---
 
-*Updated: 2026-03-21 20:16* - 前端编译通过，API 验证正常
+*Updated: 2026-04-15 17:15* - 重构完成，新增 Agent 协作、审批、节点管理、任务树等功能
