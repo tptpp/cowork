@@ -14,6 +14,11 @@ type AgentTemplate struct {
 	BasePrompt   string `gorm:"type:text" json:"base_prompt"`
 	SystemPrompt string `gorm:"type:text" json:"system_prompt"`
 
+	// 模型配置
+	DefaultModel string  `gorm:"type:varchar(50)" json:"default_model"`   // 如 "gpt-4"
+	MaxTokens    int     `gorm:"default:4096" json:"max_tokens"`
+	Temperature  float64 `gorm:"default:0.7" json:"temperature"`
+
 	// 工具配置
 	AllowedTools    StringArray `gorm:"type:text" json:"allowed_tools"`
 	RestrictedTools StringArray `gorm:"type:text" json:"restricted_tools"`
