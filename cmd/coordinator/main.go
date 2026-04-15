@@ -246,47 +246,27 @@ func main() {
 		h.SetAIConfig(modelType, coordCfg.AIBaseURL, coordCfg.AIModel, coordCfg.AIAPIKey)
 		slog.Info("AI config loaded from file", "type", modelType, "model", coordCfg.AIModel)
 
-		// 初始化 ConversationCoordinator（支持 Function Calling + 任务拆解）
-		engine := agent.NewFunctionCallingEngine(
+		// 初始化 LLMClient 和 Coordinator
+		llmClient := agent.NewLLMClient(
+			toolRegistry,
+			60*time.Second,
+		)
+
+		// 初始化 Coordinator（使用新的统一结构）
+		coordinator := agent.NewCoordinator(
+			llmClient,
 			toolRegistry,
 			store.NewToolExecutionStore(s.DB()),
 			store.NewTaskStore(s.DB()),
-			agent.FunctionCallingConfig{
-				MaxToolRounds: 10,
-				Timeout:       60 * time.Second,
-			},
-		)
-
-		// 创建 Agent 工具调度器（用于 Function Calling 的工具执行）
-		agentToolScheduler := agent.NewToolScheduler(
-			toolRegistry,
-			store.NewToolExecutionStore(s.DB()),
-			store.NewTaskStore(s.DB()),
-			nil, // taskCreator - 暂时不支持远程工具执行
-			10,  // maxConcurrent
-		)
-
-		// 启动工具调度器
-		agentToolScheduler.Start(context.Background())
-		slog.Info("Tool scheduler started")
-
-		// 使用带任务拆解功能的 Coordinator
-		coordinator := agent.NewConversationCoordinatorWithDecomposer(
-			engine,
-			agentToolScheduler,
 			store.NewAgentSessionStore(s.DB()),
-			store.NewToolExecutionStore(s.DB()),
-			toolRegistry,
 			store.NewAgentTemplateStore(s.DB()),
-			store.NewTaskStore(s.DB()),
-			store.NewTaskGroupStore(s.DB()),
-			store.NewTaskDependencyStore(s.DB()),
-			agent.CoordinatorConfig{
+			hub,
+			agent.AgentConfig{
 				MaxToolRounds: 10,
 			},
 		)
 		h.SetAgentCoordinator(coordinator)
-		slog.Info("Agent coordinator initialized with Function Calling + Task Decomposition support")
+		slog.Info("Coordinator initialized with unified Agent structure")
 	}
 
 	// 创建 Gin 路由
@@ -352,8 +332,8 @@ func main() {
 		api.POST("/tasks/:id/logs", h.CreateTaskLog)
 		api.DELETE("/tasks/:id", h.CancelTask) // 统一使用 DELETE 方法取消任务
 		api.GET("/tasks/:id/logs", h.GetTaskLogs)
-		api.GET("/tasks/:id/files", h.GetTaskFiles)       // 任务文件列表
-		api.POST("/tasks/:id/files", h.UploadTaskFile)    // 上传任务文件
+		api.GET("/tasks/:id/files", h.GetTaskFiles)    // 任务文件列表
+		api.POST("/tasks/:id/files", h.UploadTaskFile) // 上传任务文件
 
 		// Worker API
 		api.GET("/workers", h.GetWorkers)

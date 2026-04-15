@@ -28,7 +28,7 @@ type AgentHandler struct {
 	taskStore     store.TaskStore
 	fileStore     store.TaskFileStore
 	registry      *tools.Registry
-	coordinator   *agent.ConversationCoordinator
+	coordinator   *agent.Coordinator
 	modelRouter   *ModelRouter // 模型路由
 }
 
@@ -56,7 +56,7 @@ func (h *AgentHandler) SetModelRouter(router *ModelRouter) {
 }
 
 // SetCoordinator 设置协调器
-func (h *AgentHandler) SetCoordinator(coordinator *agent.ConversationCoordinator) {
+func (h *AgentHandler) SetCoordinator(coordinator *agent.Coordinator) {
 	h.coordinator = coordinator
 }
 
@@ -697,21 +697,14 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 		return
 	}
 
-	// 获取工具列表：如果用户没有指定，使用所有可用工具
-	toolNames := req.Tools
-	if len(toolNames) == 0 {
-		toolNames = h.registry.GetToolNames()
-	}
-
-	// 使用协调器处理 (支持 Function Calling + 任务拆解)
+	// 使用协调器处理 (支持 Function Calling)
 	onToken := func(token string) {
 		c.SSEvent("message", StreamResponse{Type: "token", Content: token})
 		c.Writer.Flush()
 	}
 
-	result, taskGroup, err := h.coordinator.ProcessWithDecomposition(
+	result, err := h.coordinator.ProcessMessage(
 		c.Request.Context(),
-		sessionID,
 		content,
 		agent.ModelConfig{
 			Type:    cfg.Type,
@@ -719,7 +712,6 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 			BaseURL: cfg.BaseURL,
 			Model:   cfg.Model,
 		},
-		toolNames,
 		onToken,
 	)
 
@@ -729,15 +721,6 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 		return
 	}
 
-		// 如果任务被拆解，发送任务组信息
-		if taskGroup != nil {
-			c.SSEvent("message", map[string]interface{}{
-				"type":       "task_decomposed",
-				"task_group": taskGroup,
-				"total_tasks": taskGroup.TotalTasks,
-			})
-			c.Writer.Flush()
-		}
 	// 发送工具调用信息
 	if len(result.ToolCalls) > 0 {
 		c.SSEvent("message", map[string]interface{}{

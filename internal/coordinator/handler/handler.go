@@ -80,7 +80,7 @@ func (h *Handler) GetModelRouter() *ModelRouter {
 }
 
 // SetAgentCoordinator 设置 Agent 协调器（支持 Function Calling）
-func (h *Handler) SetAgentCoordinator(coordinator *agent.ConversationCoordinator) {
+func (h *Handler) SetAgentCoordinator(coordinator *agent.Coordinator) {
 	h.agentHandler.SetCoordinator(coordinator)
 }
 
