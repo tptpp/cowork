@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -227,6 +228,11 @@ func (a *Agent) processWithToolCalls(
 
 // getAllowedTools 获取允许的工具列表
 func (a *Agent) getAllowedTools() []string {
+	// Nil check for registry
+	if a.registry == nil {
+		return []string{}
+	}
+
 	if a.Template == nil {
 		// 无模板时返回所有工具
 		return a.registry.GetToolNames()
@@ -456,8 +462,17 @@ func (a *Agent) toolReadFile(args map[string]interface{}) (string, bool) {
 		path = a.WorkspacePath + path
 	}
 
+	// Clean the path to prevent traversal attacks
+	cleanPath := filepath.Clean(path)
+
+	// Verify path stays within workspace boundaries
+	cleanWorkspace := filepath.Clean(a.WorkspacePath)
+	if !strings.HasPrefix(cleanPath, cleanWorkspace) {
+		return "Path traversal detected: access denied", true
+	}
+
 	// 读取文件内容
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return fmt.Sprintf("Failed to read file: %v", err), true
 	}
