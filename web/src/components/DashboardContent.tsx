@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { ResponsiveGridLayout } from 'react-grid-layout'
 import type { Layout, ResponsiveLayouts } from 'react-grid-layout'
-import { Plus, LayoutDashboard, List, RotateCcw, Settings } from 'lucide-react'
+import { Plus, LayoutDashboard, List, RotateCcw, Settings, Shield, Server, GitBranch } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -13,6 +13,7 @@ import {
 import { TaskList } from '@/components/tasks/TaskList'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
 import { TaskForm } from '@/components/tasks/TaskForm'
+import { TaskTreeView } from '@/components/tasks/TaskTreeView'
 import { WidgetWrapper } from '@/components/dashboard/WidgetWrapper'
 import { WidgetStore } from '@/components/dashboard/WidgetStore'
 import {
@@ -21,6 +22,9 @@ import {
   WorkerStatusWidget,
 } from '@/components/widgets'
 import { AgentChatWidget } from '@/components/widgets/AgentChatWidget'
+import { ApprovalWidget } from '@/components/widgets/ApprovalWidget'
+import { NodeStatusWidget } from '@/components/widgets/NodeStatusWidget'
+import { AgentMessageWidget } from '@/components/widgets/AgentMessageWidget'
 import { NotificationWidget } from '@/components/widgets/NotificationWidget'
 import { ToastContainer } from '@/components/ui/Toast'
 import { useLayoutStore } from '@/stores/layoutStore'
@@ -46,6 +50,14 @@ function WidgetRenderer({ widget, onSelectTask, onCreateTask }: { widget: Widget
       return <WorkerStatusWidget />
     case 'agent-chat':
       return <AgentChatWidget />
+    case 'approval-queue':
+      return <ApprovalWidget />
+    case 'node-status':
+      return <NodeStatusWidget />
+    case 'agent-messages':
+      return <AgentMessageWidget />
+    case 'task-tree':
+      return <TaskTreeView onSelectTask={onSelectTask} />
     default:
       return (
         <div className="flex items-center justify-center h-full text-muted-foreground">

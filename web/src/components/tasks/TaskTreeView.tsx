@@ -1,14 +1,17 @@
 // web/src/components/tasks/TaskTreeView.tsx
 import React from 'react';
 import { useTaskTreeStore } from '@/stores/taskTreeStore';
+import { useTaskStore } from '@/stores/taskStore';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import type { Task } from '@/types';
 
 interface TaskTreeViewProps {
   onTaskClick?: (taskId: string) => void;
+  onSelectTask?: (task: Task) => void;
 }
 
-export function TaskTreeView({ onTaskClick }: TaskTreeViewProps) {
+export function TaskTreeView({ onTaskClick, onSelectTask }: TaskTreeViewProps) {
   const {
     tasks,
     rootTaskId,

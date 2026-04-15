@@ -47,6 +47,38 @@ export const WIDGET_REGISTRY: Record<WidgetType, WidgetDefinition> = {
     defaultSize: { w: 4, h: 4 },
     minSize: { w: 3, h: 3 },
   },
+  'approval-queue': {
+    type: 'approval-queue',
+    name: 'Approval Queue',
+    icon: 'Shield',
+    description: 'Tiered approval management for agent actions',
+    defaultSize: { w: 6, h: 4 },
+    minSize: { w: 4, h: 3 },
+  },
+  'node-status': {
+    type: 'node-status',
+    name: 'Node Status',
+    icon: 'Server',
+    description: 'Compute node status and capabilities',
+    defaultSize: { w: 6, h: 4 },
+    minSize: { w: 4, h: 3 },
+  },
+  'agent-messages': {
+    type: 'agent-messages',
+    name: 'Agent Messages',
+    icon: 'MessageSquare',
+    description: 'Inter-agent communication and coordination',
+    defaultSize: { w: 6, h: 5 },
+    minSize: { w: 4, h: 4 },
+  },
+  'task-tree': {
+    type: 'task-tree',
+    name: 'Task Tree',
+    icon: 'GitBranch',
+    description: 'Task dependency and inheritance visualization',
+    defaultSize: { w: 8, h: 5 },
+    minSize: { w: 6, h: 4 },
+  },
 }
 
 // Default widgets configuration
