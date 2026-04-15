@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tp/cowork/internal/coordinator/store"
+	"github.com/tp/cowork/internal/coordinator/ws"
 	"github.com/tp/cowork/internal/shared/models"
 )
 
@@ -14,13 +15,15 @@ import (
 type Service struct {
 	reqStore    store.ApprovalRequestStore
 	policyStore store.ApprovalPolicyStore
+	hub         *ws.Hub
 }
 
 // NewService 创建审批服务
-func NewService(reqStore store.ApprovalRequestStore, policyStore store.ApprovalPolicyStore) *Service {
+func NewService(reqStore store.ApprovalRequestStore, policyStore store.ApprovalPolicyStore, hub *ws.Hub) *Service {
 	return &Service{
 		reqStore:    reqStore,
 		policyStore: policyStore,
+		hub:         hub,
 	}
 }
 
@@ -65,6 +68,11 @@ func (s *Service) CreateRequest(ctx context.Context, agentID string, action stri
 
 	if err := s.reqStore.Create(req); err != nil {
 		return nil, fmt.Errorf("failed to create approval request: %w", err)
+	}
+
+	// Broadcast approval request via WebSocket
+	if s.hub != nil {
+		s.hub.BroadcastApprovalRequest(req)
 	}
 
 	if riskLevel == models.RiskLevelMedium && timeout > 0 {

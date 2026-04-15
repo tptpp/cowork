@@ -202,6 +202,7 @@ func main() {
 	approvalService := approval.NewService(
 		store.NewApprovalRequestStore(s.DB()),
 		store.NewApprovalPolicyStore(s.DB()),
+		hub,
 	)
 	slog.Info("Approval service initialized")
 

@@ -21,11 +21,19 @@ interface ApprovalRequest {
   resolvedAt?: string;
 }
 
+// WebSocket message types
+interface WebSocketMessage {
+  type: string;
+  payload?: ApprovalRequest;
+}
+
 interface ApprovalState {
   pendingApprovals: ApprovalRequest[];
   selectedApproval: ApprovalRequest | null;
   isLoading: boolean;
   error: string | null;
+  ws: WebSocket | null;
+  wsConnected: boolean;
 
   // Actions
   fetchPendingApprovals: () => Promise<void>;
@@ -33,6 +41,9 @@ interface ApprovalState {
   approveRequest: (id: string, userId: string) => Promise<void>;
   rejectRequest: (id: string, userId: string) => Promise<void>;
   createRequest: (agentId: string, action: string, detail: Record<string, unknown>) => Promise<ApprovalRequest>;
+  connectWebSocket: () => void;
+  disconnectWebSocket: () => void;
+  handleApprovalRequest: (approval: ApprovalRequest) => void;
 }
 
 export const useApprovalStore = create<ApprovalState>((set, get) => ({
@@ -40,6 +51,84 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
   selectedApproval: null,
   isLoading: false,
   error: null,
+  ws: null,
+  wsConnected: false,
+
+  connectWebSocket: () => {
+    const existingWs = get().ws;
+    if (existingWs) {
+      return; // Already connected
+    }
+
+    // Determine WebSocket URL based on current location
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      set({ wsConnected: true });
+      // Subscribe to approvals channel
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        payload: ['approvals']
+      }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const message: WebSocketMessage = JSON.parse(event.data);
+        if (message.type === 'approval_request' && message.payload) {
+          get().handleApprovalRequest(message.payload);
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    };
+
+    ws.onclose = () => {
+      set({ wsConnected: false, ws: null });
+      // Attempt to reconnect after 5 seconds
+      setTimeout(() => {
+        if (!get().ws) {
+          get().connectWebSocket();
+        }
+      }, 5000);
+    };
+
+    ws.onerror = () => {
+      // Error occurred, will close and reconnect
+    };
+
+    set({ ws });
+  },
+
+  disconnectWebSocket: () => {
+    const ws = get().ws;
+    if (ws) {
+      ws.close();
+      set({ ws: null, wsConnected: false });
+    }
+  },
+
+  handleApprovalRequest: (approval: ApprovalRequest) => {
+    set((state) => {
+      // Check if approval already exists
+      const exists = state.pendingApprovals.some(a => a.id === approval.id);
+      if (exists) {
+        // Update existing approval
+        return {
+          pendingApprovals: state.pendingApprovals.map(a =>
+            a.id === approval.id ? approval : a
+          )
+        };
+      }
+      // Add new pending approval
+      return {
+        pendingApprovals: [approval, ...state.pendingApprovals]
+      };
+    });
+  },
 
   fetchPendingApprovals: async () => {
     set({ isLoading: true, error: null });

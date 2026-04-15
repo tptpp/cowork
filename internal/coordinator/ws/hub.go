@@ -13,15 +13,16 @@ import (
 type MessageType string
 
 const (
-	MessageTypeSubscribe   MessageType = "subscribe"
-	MessageTypeUnsubscribe MessageType = "unsubscribe"
-	MessageTypePing        MessageType = "ping"
-	MessageTypePong        MessageType = "pong"
-	MessageTypeTaskUpdate  MessageType = "task_update"
-	MessageTypeTaskLog     MessageType = "task_log"
-	MessageTypeWorkerUpdate MessageType = "worker_update"
-	MessageTypeNotification MessageType = "notification"
-	MessageTypeError       MessageType = "error"
+	MessageTypeSubscribe        MessageType = "subscribe"
+	MessageTypeUnsubscribe      MessageType = "unsubscribe"
+	MessageTypePing             MessageType = "ping"
+	MessageTypePong             MessageType = "pong"
+	MessageTypeTaskUpdate       MessageType = "task_update"
+	MessageTypeTaskLog          MessageType = "task_log"
+	MessageTypeWorkerUpdate     MessageType = "worker_update"
+	MessageTypeNotification     MessageType = "notification"
+	MessageTypeError            MessageType = "error"
+	MessageTypeApprovalRequest  MessageType = "approval_request"
 )
 
 // Message WebSocket 消息
@@ -114,6 +115,17 @@ func (h *Hub) BroadcastToChannel(channel string, message []byte) {
 		}
 		client.mu.RUnlock()
 	}
+}
+
+// BroadcastApprovalRequest broadcasts an approval request to clients subscribed to the approvals channel
+func (h *Hub) BroadcastApprovalRequest(approval interface{}) {
+	msg := Message{
+		Type: MessageTypeApprovalRequest,
+	}
+	payload, _ := json.Marshal(approval)
+	msg.Payload = payload
+	data, _ := json.Marshal(msg)
+	h.BroadcastToChannel("approvals", data)
 }
 
 // ClientCount 获取客户端数量
