@@ -335,6 +335,10 @@ type AgentMessage struct {
 	Role     string    `gorm:"type:varchar(20);not null" json:"role"` // user, assistant, system, tool
 	Content  string    `gorm:"type:text" json:"content"`
 
+	// 消息类型和上下文
+	Type    string `gorm:"type:varchar(20);index" json:"type,omitempty"`    // notify, request, etc.
+	Context JSON   `gorm:"type:text" json:"context,omitempty"`              // 上下文数据
+
 	// Tool Call 支持
 	ToolCalls  *ToolCallsArray `gorm:"type:text" json:"tool_calls,omitempty"`  // []ToolCall for assistant messages
 	ToolCallID string          `gorm:"type:varchar(64)" json:"tool_call_id,omitempty"` // 当 role=tool 时，对应的 tool_call_id
