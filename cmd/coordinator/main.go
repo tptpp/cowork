@@ -274,6 +274,7 @@ func main() {
 			store.NewAgentSessionStore(s.DB()),
 			store.NewToolExecutionStore(s.DB()),
 			toolRegistry,
+			store.NewAgentTemplateStore(s.DB()),
 			store.NewTaskStore(s.DB()),
 			store.NewTaskGroupStore(s.DB()),
 			store.NewTaskDependencyStore(s.DB()),

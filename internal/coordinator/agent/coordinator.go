@@ -19,6 +19,7 @@ type ConversationCoordinator struct {
 	sessionStore   store.AgentSessionStore
 	toolExecStore  store.ToolExecutionStore
 	registry       *tools.Registry
+	templateStore  store.AgentTemplateStore // 模板存储，用于加载系统提示词
 
 	// Phase 5: 任务拆解相关
 	decomposer     *TaskDecomposer
@@ -38,6 +39,7 @@ func NewConversationCoordinatorWithDecomposer(
 	sessionStore store.AgentSessionStore,
 	toolExecStore store.ToolExecutionStore,
 	registry *tools.Registry,
+	templateStore store.AgentTemplateStore,
 	taskStore store.TaskStore,
 	groupStore store.TaskGroupStore,
 	depStore store.TaskDependencyStore,
@@ -49,14 +51,15 @@ func NewConversationCoordinatorWithDecomposer(
 	})
 
 	return &ConversationCoordinator{
-		engine:          engine,
-		scheduler:       scheduler,
-		sessionStore:    sessionStore,
-		toolExecStore:   toolExecStore,
-		registry:        registry,
-		decomposer:      decomposer,
-		groupStore:      groupStore,
-		depStore:        depStore,
+		engine:         engine,
+		scheduler:      scheduler,
+		sessionStore:   sessionStore,
+		toolExecStore:  toolExecStore,
+		registry:       registry,
+		templateStore:  templateStore,
+		decomposer:     decomposer,
+		groupStore:     groupStore,
+		depStore:       depStore,
 	}
 }
 
@@ -83,14 +86,27 @@ func (c *ConversationCoordinator) ProcessMessage(
 	// 转换消息格式
 	chatMessages := ConvertToAgentMessages(messages)
 
-	// 确保会话存在 (不再需要读取字段，模板加载将在 Task 8 实现)
-	if _, err := c.sessionStore.Get(sessionID); err != nil {
+	// 获取会话以获取模板ID
+	session, err := c.sessionStore.Get(sessionID)
+	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
+	// 加载 Coordinator Template 获取系统提示词
+	systemPrompt := ""
+	if c.templateStore != nil {
+		template, err := c.templateStore.Get(session.CoordinatorTemplateID)
+		if err != nil || template == nil {
+			// 使用默认模板
+			template = c.getDefaultCoordinatorTemplate()
+		}
+		if template != nil {
+			systemPrompt = template.BasePrompt
+		}
+	}
+
 	// 处理多轮对话
-	// TODO: Load systemPrompt from CoordinatorTemplate (Task 8)
-	return c.processWithToolCalls(ctx, sessionID, cfg, "", chatMessages, toolNames, onToken)
+	return c.processWithToolCalls(ctx, sessionID, cfg, systemPrompt, chatMessages, toolNames, onToken)
 }
 
 // ProcessResult 处理结果
@@ -508,4 +524,15 @@ func (c *ConversationCoordinator) ProcessWithDecomposition(
 	// 正常处理
 	result, err := c.ProcessMessage(ctx, sessionID, userMessage, cfg, toolNames, onToken)
 	return result, nil, err
+}
+
+// getDefaultCoordinatorTemplate 返回默认的 Coordinator 模板
+func (c *ConversationCoordinator) getDefaultCoordinatorTemplate() *models.AgentTemplate {
+	return &models.AgentTemplate{
+		ID:          "default-coordinator",
+		Name:        "Default Coordinator",
+		Description: "Default coordinator template with basic system prompt",
+		BasePrompt:  "You are a helpful AI assistant. You can use tools to help users complete tasks. When a task is complex, consider breaking it down into smaller steps. Always be clear and helpful in your responses.",
+		IsSystem:    true,
+	}
 }
