@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ToolCall 工具调用 (OpenAI Compatible)
@@ -131,6 +133,17 @@ type Task struct {
 	GroupID     *string    `gorm:"type:varchar(64);index" json:"group_id"`
 	Group       *TaskGroup `gorm:"foreignKey:GroupID" json:"group,omitempty"`
 
+	// 继承关系 (Agent ID = Task ID)
+	RootID     string     `gorm:"type:varchar(64);index" json:"root_id"`     // 原始任务 ID（自己时等于 ID）
+	ParentID   *string    `gorm:"type:varchar(64);index" json:"parent_id"`  // 父 Agent ID（恢复代理时指向上一条）
+	TemplateID string     `gorm:"type:varchar(64);index" json:"template_id"` // Agent 模板 ID
+
+	// 数据流依赖
+	Requires   StringArray `gorm:"type:text" json:"requires"` // 需要的数据流路径列表
+
+	// 里程碑状态
+	Milestone  JSON `gorm:"type:text" json:"milestone"` // 里程碑状态
+
 	// 状态
 	Status      TaskStatus `gorm:"type:varchar(20);index" json:"status"`
 	Progress    int        `gorm:"default:0" json:"progress"` // 0-100
@@ -184,6 +197,14 @@ type Task struct {
 // TableName 指定表名
 func (Task) TableName() string {
 	return "tasks"
+}
+
+// BeforeCreate 创建前自动设置 RootID
+func (t *Task) BeforeCreate(tx *gorm.DB) error {
+	if t.RootID == "" {
+		t.RootID = t.ID
+	}
+	return nil
 }
 
 // TaskLog 任务执行日志
