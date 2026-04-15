@@ -302,9 +302,9 @@ func (Worker) TableName() string {
 type AgentSession struct {
 	ID string `gorm:"primaryKey;type:varchar(64)" json:"id"`
 
-	// 模型配置
-	Model        string `gorm:"type:varchar(50)" json:"model"`
-	SystemPrompt string `gorm:"type:text" json:"system_prompt"`
+	// 模板配置 (替代 Model, SystemPrompt, Config)
+	CoordinatorTemplateID string      `gorm:"type:varchar(64);default:'coordinator-template'" json:"coordinator_template_id"`
+	WorkerTemplateIDs    StringArray `gorm:"type:text" json:"worker_template_ids"` // 空数组=自动选择
 
 	// 上下文
 	Context JSON `gorm:"type:text" json:"context"`
@@ -312,9 +312,6 @@ type AgentSession struct {
 	// 关联任务
 	TaskID *string `gorm:"type:varchar(64);index" json:"task_id"`
 	Task   *Task   `gorm:"foreignKey:TaskID" json:"task,omitempty"`
-
-	// 配置
-	Config JSON `gorm:"type:text" json:"config"`
 
 	// 时间
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
