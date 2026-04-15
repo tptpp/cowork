@@ -2,455 +2,96 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
-	"time"
 
 	"github.com/tp/cowork/internal/coordinator/store"
 	"github.com/tp/cowork/internal/coordinator/tools"
+	"github.com/tp/cowork/internal/coordinator/ws"
 	"github.com/tp/cowork/internal/shared/models"
 )
 
-// ConversationCoordinator 对话协调器 - 处理多轮 Tool Calling
-type ConversationCoordinator struct {
-	engine         *FunctionCallingEngine
-	scheduler      *ToolScheduler
-	sessionStore   store.AgentSessionStore
-	toolExecStore  store.ToolExecutionStore
-	registry       *tools.Registry
-	templateStore  store.AgentTemplateStore // 模板存储，用于加载系统提示词
+// Coordinator Coordinator Agent - 使用统一的 Agent 结构
+type Coordinator struct {
+	agent *Agent
 
-	// Phase 5: 任务拆解相关
-	decomposer     *TaskDecomposer
-	groupStore     store.TaskGroupStore
-	depStore       store.TaskDependencyStore
+	// Coordinator 特有的能力
+	templateStore store.AgentTemplateStore
+	hub           *ws.Hub // WebSocket 用于推送
 }
 
-// CoordinatorConfig 协调器配置
-type CoordinatorConfig struct {
-	MaxToolRounds int
-}
-
-// NewConversationCoordinatorWithDecomposer 创建带任务拆解功能的协调器
-func NewConversationCoordinatorWithDecomposer(
-	engine *FunctionCallingEngine,
-	scheduler *ToolScheduler,
-	sessionStore store.AgentSessionStore,
-	toolExecStore store.ToolExecutionStore,
+// NewCoordinator 创建 Coordinator
+func NewCoordinator(
+	llmClient *LLMClient,
 	registry *tools.Registry,
-	templateStore store.AgentTemplateStore,
+	toolExecStore store.ToolExecutionStore,
 	taskStore store.TaskStore,
-	groupStore store.TaskGroupStore,
-	depStore store.TaskDependencyStore,
-	config CoordinatorConfig,
-) *ConversationCoordinator {
-	// 创建任务拆解器
-	decomposer := NewTaskDecomposer(engine, taskStore, groupStore, depStore, DecomposerConfig{
-		MaxSubTasks: 10,
-	})
+	sessionStore store.AgentSessionStore,
+	templateStore store.AgentTemplateStore,
+	hub *ws.Hub,
+	config AgentConfig,
+) *Coordinator {
+	// 加载 coordinator 模板
+	template, err := templateStore.Get("coordinator-template")
+	if err != nil || template == nil {
+		// 使用默认模板
+		template = &models.AgentTemplate{
+			ID:          "coordinator-template",
+			Name:        "Coordinator",
+			Description: "Task coordination, scheduling, monitoring",
+			BasePrompt:  "You are a coordinator agent. Your role is to decompose tasks, monitor progress, and coordinate between agents. You can create tasks, query status, and communicate with other agents.",
+			AllowedTools: models.StringArray{"create_task", "cancel_task", "query_tasks", "query_nodes", "send_message", "report_to_user"},
+			IsSystem:    true,
+		}
+	}
 
-	return &ConversationCoordinator{
-		engine:         engine,
-		scheduler:      scheduler,
-		sessionStore:   sessionStore,
-		toolExecStore:  toolExecStore,
-		registry:       registry,
-		templateStore:  templateStore,
-		decomposer:     decomposer,
-		groupStore:     groupStore,
-		depStore:       depStore,
+	agent := NewAgent(
+		"coordinator",
+		template,
+		llmClient,
+		registry,
+		toolExecStore,
+		taskStore,
+		sessionStore,
+		config,
+	)
+
+	return &Coordinator{
+		agent:         agent,
+		templateStore: templateStore,
+		hub:           hub,
 	}
 }
 
-// ProcessMessage 处理消息 (支持多轮 Tool Calling)
-func (c *ConversationCoordinator) ProcessMessage(
+// ProcessMessage 处理消息（委托给 Agent）
+func (c *Coordinator) ProcessMessage(
 	ctx context.Context,
-	sessionID string,
 	userMessage string,
 	cfg ModelConfig,
-	toolNames []string,
 	onToken func(string),
 ) (*ProcessResult, error) {
-	// 保存用户消息
-	if _, err := c.sessionStore.AddMessage(sessionID, "user", userMessage); err != nil {
-		return nil, fmt.Errorf("failed to save user message: %w", err)
-	}
-
-	// 获取历史消息
-	messages, err := c.sessionStore.GetMessages(sessionID, 100)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get history: %w", err)
-	}
-
-	// 转换消息格式
-	chatMessages := ConvertToAgentMessages(messages)
-
-	// 获取会话以获取模板ID
-	session, err := c.sessionStore.Get(sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
-	}
-
-	// 加载 Coordinator Template 获取系统提示词
-	systemPrompt := ""
-	if c.templateStore != nil {
-		template, err := c.templateStore.Get(session.CoordinatorTemplateID)
-		if err != nil || template == nil {
-			// 使用默认模板
-			template = c.getDefaultCoordinatorTemplate()
-		}
-		if template != nil {
-			systemPrompt = template.BasePrompt
-		}
-	}
-
-	// 处理多轮对话
-	return c.processWithToolCalls(ctx, sessionID, cfg, systemPrompt, chatMessages, toolNames, onToken)
-}
-
-// ProcessResult 处理结果
-type ProcessResult struct {
-	Response      string
-	ToolCalls     []models.ToolCall
-	ToolResults   []ToolResultInfo
-	TotalRounds   int
-	FinishReason  string
-}
-
-// ToolResultInfo 工具结果信息
-type ToolResultInfo struct {
-	ToolCallID string
-	ToolName   string
-	Result     string
-	IsError    bool
-}
-
-// processWithToolCalls 处理带 Tool Calling 的对话
-func (c *ConversationCoordinator) processWithToolCalls(
-	ctx context.Context,
-	sessionID string,
-	cfg ModelConfig,
-	systemPrompt string,
-	messages []ChatMessage,
-	toolNames []string,
-	onToken func(string),
-) (*ProcessResult, error) {
-	result := &ProcessResult{
-		TotalRounds: 0,
-	}
-
-	var toolResults []ToolResultInfo
-
-	for round := 0; round < c.engine.maxToolRounds; round++ {
-		result.TotalRounds = round + 1
-
-		var toolCalls []models.ToolCall
-		var response string
-		var finishReason string
-
-		// 根据模型类型调用不同的 API
-		switch cfg.Type {
-		case "openai", "glm":
-			resp, err := c.callOpenAIWithRetry(ctx, cfg, systemPrompt, messages, toolNames, onToken)
-			if err != nil {
-				return nil, err
-			}
-			response = fmt.Sprintf("%v", resp.Choices[0].Message.Content)
-			toolCalls = resp.Choices[0].Message.ToolCalls
-			finishReason = resp.Choices[0].FinishReason
-
-		case "anthropic":
-			resp, err := c.callAnthropicWithRetry(ctx, cfg, systemPrompt, messages, toolNames, onToken)
-			if err != nil {
-				return nil, err
-			}
-			// 提取文本内容
-			for _, block := range resp.Content {
-				if block.Type == "text" {
-					response += block.Text
-				}
-			}
-			toolCalls = c.engine.ParseToolCallsFromAnthropic(resp)
-			finishReason = resp.StopReason
-
-		default:
-			return nil, fmt.Errorf("unsupported model type: %s", cfg.Type)
-		}
-
-		// 如果没有 tool calls，保存响应并返回
-		if len(toolCalls) == 0 {
-			// 保存助手消息
-			if _, err := c.sessionStore.AddMessage(sessionID, "assistant", response); err != nil {
-				log.Printf("Failed to save assistant message: %v", err)
-			}
-
-			result.Response = response
-			result.FinishReason = finishReason
-			result.ToolResults = toolResults
-			return result, nil
-		}
-
-		// 有 tool calls，保存带 tool_calls 的助手消息
-		toolCallsArray := models.ToolCallsArray(toolCalls)
-		assistantMsg := &models.AgentMessage{
-			SessionID: sessionID,
-			Role:      "assistant",
-			Content:   response,
-			ToolCalls: &toolCallsArray,
-		}
-
-		// 直接创建消息（绕过 AddMessage 的简化接口）
-		if err := c.saveMessage(assistantMsg); err != nil {
-			log.Printf("Failed to save assistant message with tool calls: %v", err)
-		}
-
-		result.ToolCalls = toolCalls
-
-		// 执行所有 tool calls
-		var execResults []ToolResultInfo
-		for _, tc := range toolCalls {
-			execResult, err := c.executeToolCall(sessionID, tc)
-			if err != nil {
-				log.Printf("Failed to execute tool %s: %v", tc.Function.Name, err)
-				execResult = ToolResultInfo{
-					ToolCallID: tc.ID,
-					ToolName:   tc.Function.Name,
-					Result:     err.Error(),
-					IsError:    true,
-				}
-			}
-			execResults = append(execResults, execResult)
-
-			// 保存 tool result 消息
-			if _, err := c.sessionStore.AddMessage(sessionID, "tool", execResult.Result); err != nil {
-				log.Printf("Failed to save tool result message: %v", err)
-			}
-		}
-
-		toolResults = append(toolResults, execResults...)
-
-		// 构建下一轮消息
-		// 添加助手消息（带 tool calls）
-		messages = append(messages, ChatMessage{
-			Role:      "assistant",
-			Content:   response,
-			ToolCalls: toolCalls,
-		})
-
-		// 添加 tool result 消息
-		for _, tr := range execResults {
-			messages = append(messages, ChatMessage{
-				Role:       "tool",
-				ToolCallID: tr.ToolCallID,
-				Content:    tr.Result,
-				Name:       tr.ToolName,
-			})
-		}
-
-		// 继续下一轮...
-	}
-
-	// 达到最大轮数
-	return nil, fmt.Errorf("max tool call rounds reached (%d)", c.engine.maxToolRounds)
-}
-
-// callOpenAIWithRetry 调用 OpenAI API (带重试)
-func (c *ConversationCoordinator) callOpenAIWithRetry(
-	ctx context.Context,
-	cfg ModelConfig,
-	systemPrompt string,
-	messages []ChatMessage,
-	toolNames []string,
-	onToken func(string),
-) (*ChatResponse, error) {
-	req, err := c.engine.BuildOpenAIRequest(cfg.Model, messages, systemPrompt, toolNames)
-	if err != nil {
-		return nil, err
-	}
-
-	if onToken != nil {
-		return c.engine.StreamOpenAI(cfg, req, onToken)
-	}
-
-	return c.engine.CallOpenAI(cfg, req)
-}
-
-// callAnthropicWithRetry 调用 Anthropic API (带重试)
-func (c *ConversationCoordinator) callAnthropicWithRetry(
-	ctx context.Context,
-	cfg ModelConfig,
-	systemPrompt string,
-	messages []ChatMessage,
-	toolNames []string,
-	onToken func(string),
-) (*AnthropicResponse, error) {
-	req, err := c.engine.BuildAnthropicRequest(cfg.Model, messages, systemPrompt, toolNames)
-	if err != nil {
-		return nil, err
-	}
-
-	if onToken != nil {
-		return c.engine.StreamAnthropic(cfg, req, onToken)
-	}
-
-	return c.engine.CallAnthropic(cfg, req)
-}
-
-// executeToolCall 执行工具调用
-func (c *ConversationCoordinator) executeToolCall(
-	sessionID string,
-	toolCall models.ToolCall,
-) (ToolResultInfo, error) {
-	// 获取工具定义
-	toolDef, err := c.registry.Get(toolCall.Function.Name)
-	if err != nil {
-		return ToolResultInfo{}, fmt.Errorf("tool not found: %s", toolCall.Function.Name)
-	}
-
-	// 解析参数
-	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-		return ToolResultInfo{}, fmt.Errorf("failed to parse arguments: %w", err)
-	}
-
-	// 创建执行记录
-	execution := &models.ToolExecution{
-		ConversationID: sessionID,
-		ToolName:       toolCall.Function.Name,
-		ToolCallID:     toolCall.ID,
-		Arguments:      args,
-		Status:         string(models.ToolExecutionStatusPending),
-	}
-
-	// 根据执行模式处理
-	if toolDef.ExecuteMode == models.ToolExecuteModeLocal {
-		// 本地工具直接执行
-		execResult, err := c.engine.ExecuteToolCall(sessionID, toolCall)
-		if err != nil {
-			return ToolResultInfo{
-				ToolCallID: toolCall.ID,
-				ToolName:   toolCall.Function.Name,
-				Result:     err.Error(),
-				IsError:    true,
-			}, nil
-		}
-
-		return ToolResultInfo{
-			ToolCallID: toolCall.ID,
-			ToolName:   toolCall.Function.Name,
-			Result:     execResult.Result,
-			IsError:    execResult.IsError,
-		}, nil
-	}
-
-	// 远程工具 - 通过 scheduler 调度执行
-	if c.scheduler == nil {
-		// 没有 scheduler，只能创建记录等待
-		if err := c.toolExecStore.Create(execution); err != nil {
-			return ToolResultInfo{}, fmt.Errorf("failed to create execution record: %w", err)
-		}
-		return ToolResultInfo{
-			ToolCallID: toolCall.ID,
-			ToolName:   toolCall.Function.Name,
-			Result:     fmt.Sprintf("Tool execution pending (ID: %d). Remote tools require worker execution.", execution.ID),
-			IsError:    false,
-		}, nil
-	}
-
-	// 使用 scheduler 调度执行
-	if err := c.scheduler.Schedule(execution); err != nil {
-		return ToolResultInfo{
-			ToolCallID: toolCall.ID,
-			ToolName:   toolCall.Function.Name,
-			Result:     fmt.Sprintf("Failed to schedule tool execution: %v", err),
-			IsError:    true,
-		}, nil
-	}
-
-	// 等待远程工具执行完成（最多等待 60 秒）
-	result := c.waitForToolExecution(execution, 60*time.Second)
-	return result, nil
-}
-
-// waitForToolExecution 等待工具执行完成
-func (c *ConversationCoordinator) waitForToolExecution(execution *models.ToolExecution, timeout time.Duration) ToolResultInfo {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		// 查询执行状态
-		exec, err := c.toolExecStore.Get(execution.ID)
-		if err != nil {
-			return ToolResultInfo{
-				ToolCallID: execution.ToolCallID,
-				ToolName:   execution.ToolName,
-				Result:     fmt.Sprintf("Failed to get execution status: %v", err),
-				IsError:    true,
-			}
-		}
-
-		// 检查是否完成
-		if exec.Status == string(models.ToolExecutionStatusCompleted) {
-			return ToolResultInfo{
-				ToolCallID: execution.ToolCallID,
-				ToolName:   execution.ToolName,
-				Result:     exec.Result,
-				IsError:    exec.IsError,
-			}
-		}
-
-		if exec.Status == string(models.ToolExecutionStatusFailed) {
-			return ToolResultInfo{
-				ToolCallID: execution.ToolCallID,
-				ToolName:   execution.ToolName,
-				Result:     exec.Result,
-				IsError:    true,
-			}
-		}
-
-		// 等待 500ms 后重试
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// 超时
-	return ToolResultInfo{
-		ToolCallID: execution.ToolCallID,
-		ToolName:   execution.ToolName,
-		Result:     fmt.Sprintf("Tool execution timed out after %v", timeout),
-		IsError:    true,
-	}
-}
-
-// saveMessage 保存消息
-func (c *ConversationCoordinator) saveMessage(msg *models.AgentMessage) error {
-	return c.sessionStore.AddMessageWithToolCalls(msg)
+	return c.agent.ProcessMessage(ctx, userMessage, cfg, onToken)
 }
 
 // ExecuteToolDirectly 直接执行工具 (用于 Human-in-loop 批准后执行)
-func (c *ConversationCoordinator) ExecuteToolDirectly(
+func (c *Coordinator) ExecuteToolDirectly(
 	ctx context.Context,
 	execution *models.ToolExecution,
 ) (string, error) {
 	// 获取工具定义
-	toolDef, err := c.registry.Get(execution.ToolName)
+	toolDef, err := c.agent.registry.Get(execution.ToolName)
 	if err != nil {
 		return "", fmt.Errorf("tool not found: %s", execution.ToolName)
 	}
 
-	// 构建 ToolCall
-	argsJSON, _ := json.Marshal(execution.Arguments)
-	toolCall := models.ToolCall{
-		ID:   execution.ToolCallID,
-		Type: "function",
-		Function: models.FunctionCall{
-			Name:      execution.ToolName,
-			Arguments: string(argsJSON),
-		},
-	}
-
-	// 执行工具
+	// 根据执行模式处理
 	if toolDef.ExecuteMode == models.ToolExecuteModeLocal {
-		// 本地工具直接执行
-		result, err := c.engine.ExecuteToolCall(execution.ConversationID, toolCall)
+		// 本地工具直接执行（使用 Agent 的工具执行能力）
+		var args map[string]interface{}
+		if execution.Arguments != nil {
+			args = execution.Arguments
+		}
+
+		result, err := c.agent.executeLocalTool(execution, args)
 		if err != nil {
 			return "", err
 		}
@@ -461,78 +102,19 @@ func (c *ConversationCoordinator) ExecuteToolDirectly(
 	return fmt.Sprintf("Remote tool '%s' queued for execution. Requires worker.", execution.ToolName), nil
 }
 
-
-// ========== Phase 5: 任务拆解能力 ==========
-
-// DecomposeTask 拆解复杂任务
-func (c *ConversationCoordinator) DecomposeTask(
-	ctx context.Context,
-	goal string,
-	conversationID string,
-	modelCfg ModelConfig,
-	workerTemplateIDs []string,
-) (*models.TaskGroup, error) {
-	if c.decomposer == nil {
-		return nil, fmt.Errorf("task decomposer not initialized")
-	}
-
-	return c.decomposer.DecomposeTask(ctx, goal, conversationID, modelCfg, workerTemplateIDs)
+// ProcessResult 处理结果 (保持兼容)
+type ProcessResult struct {
+	Response      string
+	ToolCalls     []models.ToolCall
+	ToolResults   []ToolResultInfo
+	TotalRounds   int
+	FinishReason  string
 }
 
-// ShouldDecompose 判断是否需要拆解任务
-func (c *ConversationCoordinator) ShouldDecompose(goal string) bool {
-	if c.decomposer == nil {
-		return false
-	}
-	return c.decomposer.ShouldDecompose(goal)
-}
-
-
-// ProcessWithDecomposition 处理消息（支持自动拆解）
-func (c *ConversationCoordinator) ProcessWithDecomposition(
-	ctx context.Context,
-	sessionID string,
-	userMessage string,
-	cfg ModelConfig,
-	toolNames []string,
-	onToken func(string),
-) (*ProcessResult, *models.TaskGroup, error) {
-	// 检查是否需要拆解
-	if c.ShouldDecompose(userMessage) {
-		// 获取 session 以获取 WorkerTemplateIDs
-		session, err := c.sessionStore.Get(sessionID)
-		var workerTemplateIDs []string
-		if err == nil && session != nil {
-			workerTemplateIDs = session.WorkerTemplateIDs
-		}
-
-		// 执行拆解
-		group, err := c.DecomposeTask(ctx, userMessage, sessionID, cfg, workerTemplateIDs)
-		if err != nil {
-			log.Printf("Failed to decompose task: %v", err)
-			// 拆解失败，继续正常处理
-		} else {
-			// 返回拆解结果
-			result := &ProcessResult{
-				Response:     fmt.Sprintf("已将任务拆解为 %d 个子任务。任务组 ID: %s", group.TotalTasks, group.ID),
-				FinishReason: "decomposed",
-			}
-			return result, group, nil
-		}
-	}
-
-	// 正常处理
-	result, err := c.ProcessMessage(ctx, sessionID, userMessage, cfg, toolNames, onToken)
-	return result, nil, err
-}
-
-// getDefaultCoordinatorTemplate 返回默认的 Coordinator 模板
-func (c *ConversationCoordinator) getDefaultCoordinatorTemplate() *models.AgentTemplate {
-	return &models.AgentTemplate{
-		ID:          "default-coordinator",
-		Name:        "Default Coordinator",
-		Description: "Default coordinator template with basic system prompt",
-		BasePrompt:  "You are a helpful AI assistant. You can use tools to help users complete tasks. When a task is complex, consider breaking it down into smaller steps. Always be clear and helpful in your responses.",
-		IsSystem:    true,
-	}
+// ToolResultInfo 工具结果信息 (保持兼容)
+type ToolResultInfo struct {
+	ToolCallID string
+	ToolName   string
+	Result     string
+	IsError    bool
 }
