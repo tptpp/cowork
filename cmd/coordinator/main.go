@@ -27,7 +27,6 @@ import (
 	"github.com/tp/cowork/internal/coordinator/ws"
 	"github.com/tp/cowork/internal/shared/config"
 	"github.com/tp/cowork/internal/shared/logger"
-	"github.com/tp/cowork/internal/shared/models"
 	"github.com/tp/cowork/internal/shared/utils"
 )
 
@@ -205,6 +204,9 @@ func main() {
 		store.NewApprovalPolicyStore(s.DB()),
 	)
 	slog.Info("Approval service initialized")
+
+	// 初始化 Approval Handler
+	approvalHandler := handler.NewApprovalHandler(approvalService)
 
 	// ========== 新增 Handler ==========
 
@@ -406,61 +408,7 @@ func main() {
 		nodeHandler.RegisterRoutes(api)
 
 		// Approval API (审批)
-		api.POST("/approvals", func(c *gin.Context) {
-			var req struct {
-				AgentID string      `json:"agent_id"`
-				Action  string      `json:"action"`
-				Detail  models.JSON `json:"detail"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
-				return
-			}
-			approvalReq, err := approvalService.CreateRequest(c.Request.Context(), req.AgentID, req.Action, req.Detail)
-			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, approvalReq)
-		})
-		api.GET("/approvals/pending", func(c *gin.Context) {
-			reqs, err := approvalService.ListPending(c.Request.Context(), 50)
-			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, reqs)
-		})
-		api.POST("/approvals/:id/approve", func(c *gin.Context) {
-			id := c.Param("id")
-			var req struct {
-				UserID string `json:"user_id"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
-				return
-			}
-			if err := approvalService.Approve(c.Request.Context(), id, req.UserID); err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, gin.H{"status": "approved"})
-		})
-		api.POST("/approvals/:id/reject", func(c *gin.Context) {
-			id := c.Param("id")
-			var req struct {
-				UserID string `json:"user_id"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
-				return
-			}
-			if err := approvalService.Reject(c.Request.Context(), id, req.UserID); err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(200, gin.H{"status": "rejected"})
-		})
+		approvalHandler.RegisterRoutes(api)
 
 		// Agent Template API
 		api.GET("/agent/templates", func(c *gin.Context) {
