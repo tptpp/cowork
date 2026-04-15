@@ -16,14 +16,18 @@ import (
 	"github.com/gorilla/websocket"
 	sloggin "github.com/samber/slog-gin"
 	"github.com/tp/cowork/internal/coordinator/agent"
+	"github.com/tp/cowork/internal/coordinator/approval"
 	"github.com/tp/cowork/internal/coordinator/handler"
+	"github.com/tp/cowork/internal/coordinator/message"
 	"github.com/tp/cowork/internal/coordinator/middleware"
+	"github.com/tp/cowork/internal/coordinator/node"
 	"github.com/tp/cowork/internal/coordinator/scheduler"
 	"github.com/tp/cowork/internal/coordinator/store"
 	"github.com/tp/cowork/internal/coordinator/tools"
 	"github.com/tp/cowork/internal/coordinator/ws"
 	"github.com/tp/cowork/internal/shared/config"
 	"github.com/tp/cowork/internal/shared/logger"
+	"github.com/tp/cowork/internal/shared/models"
 	"github.com/tp/cowork/internal/shared/utils"
 )
 
@@ -166,6 +170,49 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("Tool registry initialized", "count", len(toolRegistry.GetBuiltinTools()))
+
+	// ========== 新增服务初始化 ==========
+
+	// 初始化 Node Registry 和 Scheduler
+	nodeRegistry := node.NewRegistry(store.NewNodeStore(s.DB()))
+	nodeScheduler := node.NewScheduler(
+		nodeRegistry,
+		store.NewNodeStore(s.DB()),
+		store.NewTaskStore(s.DB()),
+		store.NewTaskDependencyStore(s.DB()),
+	)
+	slog.Info("Node registry and scheduler initialized")
+
+	// 初始化 Message Router
+	msgRouter := message.NewRouter(
+		store.NewMessageStore(s.DB()),
+		store.NewTaskStore(s.DB()),
+		s.DB(),
+	)
+	slog.Info("Message router initialized")
+
+	// 初始化 Agent Template Manager
+	templateManager := agent.NewTemplateManager(store.NewAgentTemplateStore(s.DB()))
+	if err := templateManager.InitSystemTemplates(context.Background()); err != nil {
+		slog.Warn("Failed to initialize system templates", "error", err)
+	} else {
+		slog.Info("System agent templates initialized")
+	}
+
+	// 初始化 Approval Service
+	approvalService := approval.NewService(
+		store.NewApprovalRequestStore(s.DB()),
+		store.NewApprovalPolicyStore(s.DB()),
+	)
+	slog.Info("Approval service initialized")
+
+	// ========== 新增 Handler ==========
+
+	// 初始化 Message Handler
+	messageHandler := handler.NewMessageHandler(msgRouter, store.NewMessageStore(s.DB()))
+
+	// 初始化 Node Handler
+	nodeHandler := handler.NewNodeHandler(nodeRegistry, nodeScheduler)
 
 	// 初始化处理器
 	h := handler.NewHandler(
@@ -341,6 +388,90 @@ func main() {
 		api.POST("/files/upload", h.UploadFile)
 		api.GET("/files/:id", h.DownloadFile)
 		api.DELETE("/files/:id", h.DeleteFile)
+
+		// ========== 新增 API ==========
+
+		// Message API (Agent间通信)
+		messageHandler.RegisterRoutes(api)
+
+		// Node API (节点管理)
+		nodeHandler.RegisterRoutes(api)
+
+		// Approval API (审批)
+		api.POST("/approvals", func(c *gin.Context) {
+			var req struct {
+				AgentID string      `json:"agent_id"`
+				Action  string      `json:"action"`
+				Detail  models.JSON `json:"detail"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
+			}
+			approvalReq, err := approvalService.CreateRequest(c.Request.Context(), req.AgentID, req.Action, req.Detail)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, approvalReq)
+		})
+		api.GET("/approvals/pending", func(c *gin.Context) {
+			reqs, err := approvalService.ListPending(c.Request.Context(), 50)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, reqs)
+		})
+		api.POST("/approvals/:id/approve", func(c *gin.Context) {
+			id := c.Param("id")
+			var req struct {
+				UserID string `json:"user_id"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
+			}
+			if err := approvalService.Approve(c.Request.Context(), id, req.UserID); err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, gin.H{"status": "approved"})
+		})
+		api.POST("/approvals/:id/reject", func(c *gin.Context) {
+			id := c.Param("id")
+			var req struct {
+				UserID string `json:"user_id"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
+			}
+			if err := approvalService.Reject(c.Request.Context(), id, req.UserID); err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, gin.H{"status": "rejected"})
+		})
+
+		// Agent Template API
+		api.GET("/agent/templates", func(c *gin.Context) {
+			templates, err := templateManager.List(c.Request.Context())
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, templates)
+		})
+		api.GET("/agent/templates/:id", func(c *gin.Context) {
+			id := c.Param("id")
+			template, err := templateManager.Get(c.Request.Context(), id)
+			if err != nil {
+				c.JSON(404, gin.H{"error": "template not found"})
+				return
+			}
+			c.JSON(200, template)
+		})
 	}
 
 	// 启动 HTTP 服务器
