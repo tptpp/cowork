@@ -67,10 +67,9 @@ func TestParseToolCallsFromOpenAI(t *testing.T) {
 		},
 	}
 
-	// 创建引擎（只需要 nil 参数）
-	engine := &FunctionCallingEngine{}
-
-	toolCalls := engine.ParseToolCallsFromOpenAI(resp)
+	// 使用 LLMClient 的方法
+	client := NewLLMClient(nil, 0)
+	toolCalls := client.ParseToolCallsFromOpenAI(resp)
 
 	if len(toolCalls) != 1 {
 		t.Fatalf("Expected 1 tool call, got %d", len(toolCalls))
@@ -98,9 +97,8 @@ func TestParseToolCallsFromAnthropic(t *testing.T) {
 		},
 	}
 
-	engine := &FunctionCallingEngine{}
-
-	toolCalls := engine.ParseToolCallsFromAnthropic(resp)
+	client := NewLLMClient(nil, 0)
+	toolCalls := client.ParseToolCallsFromAnthropic(resp)
 
 	if len(toolCalls) != 1 {
 		t.Fatalf("Expected 1 tool call, got %d", len(toolCalls))
@@ -212,16 +210,7 @@ func TestContentBlockJSON(t *testing.T) {
 }
 
 func TestBuildToolResultMessage(t *testing.T) {
-	engine := &FunctionCallingEngine{}
-
-	execution := &models.ToolExecution{
-		ToolCallID: "call_123",
-		ToolName:   "read_file",
-		Result:     "file contents here",
-		IsError:    false,
-	}
-
-	msg := engine.BuildToolResultMessage(execution)
+	msg := BuildToolResultMessage("call_123", "read_file", "file contents here")
 
 	if msg.Role != "tool" {
 		t.Errorf("Expected role 'tool', got '%s'", msg.Role)
@@ -233,5 +222,69 @@ func TestBuildToolResultMessage(t *testing.T) {
 
 	if msg.Name != "read_file" {
 		t.Errorf("Expected name 'read_file', got '%s'", msg.Name)
+	}
+}
+
+func TestBuildOpenAIRequest(t *testing.T) {
+	// Simple test without registry dependency
+	client := NewLLMClient(nil, 0)
+
+	messages := []ChatMessage{
+		{Role: "user", Content: "帮我查看当前目录"},
+	}
+
+	req, err := client.BuildOpenAIRequest("gpt-4", messages, "You are a helpful assistant.", nil)
+	if err != nil {
+		t.Fatalf("Failed to build OpenAI request: %v", err)
+	}
+
+	if req.Model != "gpt-4" {
+		t.Errorf("Expected model 'gpt-4', got %s", req.Model)
+	}
+
+	if len(req.Messages) != 2 {
+		t.Errorf("Expected 2 messages (system + user), got %d", len(req.Messages))
+	}
+
+	// 验证系统消息
+	if req.Messages[0].Role != "system" {
+		t.Errorf("First message should be system, got %s", req.Messages[0].Role)
+	}
+
+	// Verify tool_choice is not set when no tools
+	if req.ToolChoice != nil {
+		t.Errorf("ToolChoice should be nil when no tools specified")
+	}
+}
+
+func TestBuildAnthropicRequest(t *testing.T) {
+	client := NewLLMClient(nil, 0)
+
+	messages := []ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi!", ToolCalls: []models.ToolCall{
+			{
+				ID:   "tool_001",
+				Type: "function",
+				Function: models.FunctionCall{
+					Name:      "read_file",
+					Arguments: `{"path": "/tmp/test.txt"}`,
+				},
+			},
+		}},
+		{Role: "tool", ToolCallID: "tool_001", Content: "file content", Name: "read_file"},
+	}
+
+	reqMap, err := client.BuildAnthropicRequest("claude-3", messages, "You are helpful.", nil)
+	if err != nil {
+		t.Fatalf("Failed to build Anthropic request: %v", err)
+	}
+
+	if reqMap["model"] != "claude-3" {
+		t.Errorf("Expected model 'claude-3', got %v", reqMap["model"])
+	}
+
+	if reqMap["system"] != "You are helpful." {
+		t.Errorf("Expected system prompt, got %v", reqMap["system"])
 	}
 }

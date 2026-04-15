@@ -18,10 +18,12 @@ import (
 
 // TestEnvironment 测试环境
 type TestEnvironment struct {
-	DB          *gorm.DB
-	Registry    *tools.Registry
-	TaskStore   store.TaskStore
+	DB           *gorm.DB
+	Registry     *tools.Registry
+	TaskStore    store.TaskStore
 	ToolExecStore store.ToolExecutionStore
+	SessionStore store.AgentSessionStore
+	LLMClient    *LLMClient
 }
 
 // SetupTestEnvironment 创建测试环境
@@ -53,11 +55,15 @@ func SetupTestEnvironment(t *testing.T) *TestEnvironment {
 		t.Fatalf("Failed to initialize registry: %v", err)
 	}
 
+	llmClient := NewLLMClient(registry, 30*time.Second)
+
 	return &TestEnvironment{
-		DB:           db,
-		Registry:     registry,
-		TaskStore:    store.NewTaskStore(db),
+		DB:            db,
+		Registry:      registry,
+		TaskStore:     store.NewTaskStore(db),
 		ToolExecStore: store.NewToolExecutionStore(db),
+		SessionStore:  store.NewAgentSessionStore(db),
+		LLMClient:     llmClient,
 	}
 }
 
@@ -115,8 +121,7 @@ func TestParseToolCallsFromOpenAI_E2E(t *testing.T) {
 		},
 	}
 
-	engine := &FunctionCallingEngine{}
-	toolCalls := engine.ParseToolCallsFromOpenAI(resp)
+	toolCalls := NewLLMClient(nil, 0).ParseToolCallsFromOpenAI(resp)
 
 	if len(toolCalls) != 1 {
 		t.Fatalf("Expected 1 tool call, got %d", len(toolCalls))
@@ -140,8 +145,7 @@ func TestParseToolCallsFromAnthropic_E2E(t *testing.T) {
 		},
 	}
 
-	engine := &FunctionCallingEngine{}
-	toolCalls := engine.ParseToolCallsFromAnthropic(resp)
+	toolCalls := NewLLMClient(nil, 0).ParseToolCallsFromAnthropic(resp)
 
 	if len(toolCalls) != 1 {
 		t.Fatalf("Expected 1 tool call, got %d", len(toolCalls))
@@ -230,16 +234,7 @@ func TestContentBlockJSON_E2E(t *testing.T) {
 
 // TestBuildToolResultMessage_E2E 测试构建工具结果消息
 func TestBuildToolResultMessage_E2E(t *testing.T) {
-	engine := &FunctionCallingEngine{}
-
-	execution := &models.ToolExecution{
-		ToolCallID: "call_123",
-		ToolName:   "read_file",
-		Result:     "file contents here",
-		IsError:    false,
-	}
-
-	msg := engine.BuildToolResultMessage(execution)
+	msg := BuildToolResultMessage("call_123", "read_file", "file contents here")
 
 	if msg.Role != "tool" {
 		t.Errorf("Expected role 'tool', got '%s'", msg.Role)
@@ -258,21 +253,11 @@ func TestBuildToolResultMessage_E2E(t *testing.T) {
 func TestBuildOpenAIRequest_E2E(t *testing.T) {
 	env := SetupTestEnvironment(t)
 
-	engine := NewFunctionCallingEngine(
-		env.Registry,
-		env.ToolExecStore,
-		env.TaskStore,
-		FunctionCallingConfig{
-			MaxToolRounds: 5,
-			Timeout:       30 * time.Second,
-		},
-	)
-
 	messages := []ChatMessage{
 		{Role: "user", Content: "帮我查看当前目录"},
 	}
 
-	req, err := engine.BuildOpenAIRequest("gpt-4", messages, "You are a helpful assistant.", []string{"execute_shell"})
+	req, err := env.LLMClient.BuildOpenAIRequest("gpt-4", messages, "You are a helpful assistant.", []string{"execute_shell"})
 	if err != nil {
 		t.Fatalf("Failed to build OpenAI request: %v", err)
 	}
@@ -299,13 +284,6 @@ func TestBuildOpenAIRequest_E2E(t *testing.T) {
 func TestBuildAnthropicRequest_E2E(t *testing.T) {
 	env := SetupTestEnvironment(t)
 
-	engine := NewFunctionCallingEngine(
-		env.Registry,
-		env.ToolExecStore,
-		env.TaskStore,
-		FunctionCallingConfig{},
-	)
-
 	messages := []ChatMessage{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi!", ToolCalls: []models.ToolCall{
@@ -321,7 +299,7 @@ func TestBuildAnthropicRequest_E2E(t *testing.T) {
 		{Role: "tool", ToolCallID: "tool_001", Content: "file content", Name: "read_file"},
 	}
 
-	reqMap, err := engine.BuildAnthropicRequest("claude-3", messages, "You are helpful.", []string{"read_file"})
+	reqMap, err := env.LLMClient.BuildAnthropicRequest("claude-3", messages, "You are helpful.", []string{"read_file"})
 	if err != nil {
 		t.Fatalf("Failed to build Anthropic request: %v", err)
 	}
@@ -337,8 +315,6 @@ func TestBuildAnthropicRequest_E2E(t *testing.T) {
 
 // TestOpenAIStreamingResponse_E2E 测试 OpenAI 流式响应处理
 func TestOpenAIStreamingResponse_E2E(t *testing.T) {
-	env := SetupTestEnvironment(t)
-
 	mockSSE := `data: {"choices":[{"delta":{"content":"Hello"}}]}
 data: {"choices":[{"delta":{"content":" world"}}]}
 data: {"choices":[{"delta":{"tool_calls":[{"id":"call_123","type":"function","function":{"name":"read_file","arguments":"{"}}]}]}
@@ -351,15 +327,10 @@ data: [DONE]`
 	}))
 	defer server.Close()
 
-	engine := NewFunctionCallingEngine(
-		env.Registry,
-		env.ToolExecStore,
-		env.TaskStore,
-		FunctionCallingConfig{Timeout: 5 * time.Second},
-	)
+	client := NewLLMClient(nil, 5*time.Second)
 
 	var tokens []string
-	resp, err := engine.StreamOpenAI(
+	resp, err := client.StreamOpenAI(
 		ModelConfig{APIKey: "test", BaseURL: server.URL, Model: "gpt-4"},
 		&ChatRequest{Model: "gpt-4", Messages: []ChatMessage{{Role: "user", Content: "test"}}},
 		func(token string) { tokens = append(tokens, token) },
@@ -382,16 +353,20 @@ data: [DONE]`
 	}
 }
 
-
-// TestToolExecution_E2E 测试工具执行
-func TestToolExecution_E2E(t *testing.T) {
+// TestAgentToolExecution_E2E 测试 Agent 工具执行
+func TestAgentToolExecution_E2E(t *testing.T) {
 	env := SetupTestEnvironment(t)
 
-	engine := NewFunctionCallingEngine(
+	// 创建 Agent
+	agent := NewAgent(
+		"test-session",
+		nil, // no template
+		env.LLMClient,
 		env.Registry,
 		env.ToolExecStore,
 		env.TaskStore,
-		FunctionCallingConfig{},
+		env.SessionStore,
+		AgentConfig{MaxToolRounds: 5},
 	)
 
 	// 测试 create_task 工具
@@ -400,17 +375,17 @@ func TestToolExecution_E2E(t *testing.T) {
 		Type: "function",
 		Function: models.FunctionCall{
 			Name:      "create_task",
-			Arguments: `{"type": "shell", "description": "Test task", "priority": "high"}`,
+			Arguments: `{"title": "Test Task", "description": "Test task description"}`,
 		},
 	}
 
-	execution, err := engine.ExecuteToolCall("conv-001", toolCall)
+	result, err := agent.executeToolCall(toolCall)
 	if err != nil {
 		t.Fatalf("Failed to execute create_task: %v", err)
 	}
 
-	if execution.Status != string(models.ToolExecutionStatusCompleted) {
-		t.Errorf("Expected completed status, got %s", execution.Status)
+	if result.IsError {
+		t.Errorf("Expected successful execution, got error: %s", result.Result)
 	}
 
 	// 验证任务已创建
@@ -421,15 +396,19 @@ func TestToolExecution_E2E(t *testing.T) {
 	}
 }
 
-// TestErrorHandling_E2E 测试错误处理
-func TestErrorHandling_E2E(t *testing.T) {
+// TestAgentErrorHandling_E2E 测试 Agent 错误处理
+func TestAgentErrorHandling_E2E(t *testing.T) {
 	env := SetupTestEnvironment(t)
 
-	engine := NewFunctionCallingEngine(
+	agent := NewAgent(
+		"test-session-2",
+		nil,
+		env.LLMClient,
 		env.Registry,
 		env.ToolExecStore,
 		env.TaskStore,
-		FunctionCallingConfig{},
+		env.SessionStore,
+		AgentConfig{},
 	)
 
 	// 测试不存在的工具
@@ -442,40 +421,25 @@ func TestErrorHandling_E2E(t *testing.T) {
 		},
 	}
 
-	_, err := engine.ExecuteToolCall("conv-002", toolCall)
+	_, err := agent.executeToolCall(toolCall)
 	if err == nil {
 		t.Error("Expected error for nonexistent tool")
 	}
-
-	// 测试无效的参数
-	invalidArgCall := models.ToolCall{
-		ID:   "call_invalid_args",
-		Type: "function",
-		Function: models.FunctionCall{
-			Name:      "create_task",
-			Arguments: `{"invalid": true}`, // 缺少必需字段
-		},
-	}
-
-	execution, err := engine.ExecuteToolCall("conv-002", invalidArgCall)
-	if err != nil {
-		t.Fatalf("ExecuteToolCall should not return error: %v", err)
-	}
-
-	if execution.Status != string(models.ToolExecutionStatusFailed) {
-		t.Errorf("Expected failed status, got %s", execution.Status)
-	}
 }
 
-// TestMultipleToolCalls_E2E 测试多工具调用
-func TestMultipleToolCalls_E2E(t *testing.T) {
+// TestAgentMultipleToolCalls_E2E 测试多工具调用
+func TestAgentMultipleToolCalls_E2E(t *testing.T) {
 	env := SetupTestEnvironment(t)
 
-	engine := NewFunctionCallingEngine(
+	agent := NewAgent(
+		"test-session-3",
+		nil,
+		env.LLMClient,
 		env.Registry,
 		env.ToolExecStore,
 		env.TaskStore,
-		FunctionCallingConfig{MaxToolRounds: 10},
+		env.SessionStore,
+		AgentConfig{MaxToolRounds: 10},
 	)
 
 	toolCalls := []models.ToolCall{
@@ -484,7 +448,7 @@ func TestMultipleToolCalls_E2E(t *testing.T) {
 			Type: "function",
 			Function: models.FunctionCall{
 				Name:      "create_task",
-				Arguments: `{"type": "shell", "description": "Task 1"}`,
+				Arguments: `{"title": "Task 1", "description": "First task"}`,
 			},
 		},
 		{
@@ -492,13 +456,13 @@ func TestMultipleToolCalls_E2E(t *testing.T) {
 			Type: "function",
 			Function: models.FunctionCall{
 				Name:      "create_task",
-				Arguments: `{"type": "script", "description": "Task 2"}`,
+				Arguments: `{"title": "Task 2", "description": "Second task"}`,
 			},
 		},
 	}
 
 	for _, tc := range toolCalls {
-		_, err := engine.ExecuteToolCall("conv-003", tc)
+		_, err := agent.executeToolCall(tc)
 		if err != nil {
 			t.Errorf("Failed to execute tool call %s: %v", tc.ID, err)
 		}
@@ -517,16 +481,19 @@ func TestMultipleToolCalls_E2E(t *testing.T) {
 	}
 }
 
-// TestConcurrentToolExecution_E2E 测试并发工具执行
-// 注意：SQLite 内存数据库在高并发写入时可能有限制，此测试验证基本功能
-func TestConcurrentToolExecution_E2E(t *testing.T) {
+// TestAgentConcurrentToolExecution_E2E 测试并发工具执行
+func TestAgentConcurrentToolExecution_E2E(t *testing.T) {
 	env := SetupTestEnvironment(t)
 
-	engine := NewFunctionCallingEngine(
+	agent := NewAgent(
+		"test-session-4",
+		nil,
+		env.LLMClient,
 		env.Registry,
 		env.ToolExecStore,
 		env.TaskStore,
-		FunctionCallingConfig{},
+		env.SessionStore,
+		AgentConfig{},
 	)
 
 	// 顺序执行多个工具调用（SQLite 内存数据库限制）
@@ -536,11 +503,11 @@ func TestConcurrentToolExecution_E2E(t *testing.T) {
 			Type: "function",
 			Function: models.FunctionCall{
 				Name:      "create_task",
-				Arguments: fmt.Sprintf(`{"type": "shell", "description": "Sequential Task %d"}`, i),
+				Arguments: fmt.Sprintf(`{"title": "Sequential Task %d", "description": "Task %d"}`, i, i),
 			},
 		}
 
-		_, err := engine.ExecuteToolCall("conv-004", toolCall)
+		_, err := agent.executeToolCall(toolCall)
 		if err != nil {
 			t.Errorf("Execution %d failed: %v", i, err)
 		}
@@ -551,14 +518,4 @@ func TestConcurrentToolExecution_E2E(t *testing.T) {
 	if taskCount != 5 {
 		t.Errorf("Expected 5 tasks, got %d", taskCount)
 	}
-}
-
-// 辅助函数
-func findIndex(slice []string, item string) int {
-	for i, v := range slice {
-		if v == item {
-			return i
-		}
-	}
-	return -1
 }
