@@ -70,15 +70,17 @@ func NewTaskDecomposer(
 // goal: 用户目标描述
 // conversationID: 会话 ID
 // modelCfg: 模型配置
+// workerTemplateIDs: 可用的 Worker 模板 ID 列表（可选，用于约束模板选择）
 // Returns: 任务组, 错误
 func (d *TaskDecomposer) DecomposeTask(
 	ctx context.Context,
 	goal string,
 	conversationID string,
 	modelCfg ModelConfig,
+	workerTemplateIDs []string,
 ) (*models.TaskGroup, error) {
 	// 1. 调用 LLM 进行任务拆解
-	decomposition, err := d.callLLMForDecomposition(ctx, goal, modelCfg)
+	decomposition, err := d.callLLMForDecomposition(ctx, goal, modelCfg, workerTemplateIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decompose task: %w", err)
 	}
@@ -160,9 +162,10 @@ func (d *TaskDecomposer) callLLMForDecomposition(
 	ctx context.Context,
 	goal string,
 	modelCfg ModelConfig,
+	workerTemplateIDs []string,
 ) (*models.DecompositionResult, error) {
 	// 构建系统提示
-	systemPrompt := d.buildDecompositionPrompt()
+	systemPrompt := d.buildDecompositionPrompt(workerTemplateIDs)
 
 	// 构建用户消息
 	userMessage := fmt.Sprintf(`请分析以下目标并拆解为可执行的子任务：
@@ -206,7 +209,16 @@ func (d *TaskDecomposer) callLLMForDecomposition(
 }
 
 // buildDecompositionPrompt 构建任务拆解的系统提示
-func (d *TaskDecomposer) buildDecompositionPrompt() string {
+func (d *TaskDecomposer) buildDecompositionPrompt(workerTemplateIDs []string) string {
+	// 构建模板约束说明
+	templateConstraint := ""
+	if len(workerTemplateIDs) > 0 {
+		templateConstraint = fmt.Sprintf(`
+
+**IMPORTANT**: You must only use templates from this restricted list: %s
+Do NOT use any other templates.`, strings.Join(workerTemplateIDs, ", "))
+	}
+
 	return `你是一个专业的任务规划助手，负责将复杂目标拆解为可执行的子任务。
 
 ## 任务拆解原则
@@ -227,6 +239,18 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
 - **review**: 代码审查、测试
 - **deploy**: 部署、配置
 
+## Agent Templates
+
+Available templates for sub-tasks:
+- coordinator-template: Task coordination, scheduling, monitoring
+- dev-template: Code development, file editing, API implementation
+- test-template: Testing execution, result analysis, bug reporting
+- review-template: Code review, security audit, best practices
+- deploy-template: Deployment, environment configuration (requires approval)
+- research-template: Technical research, documentation analysis
+
+For each sub-task, specify template_id that best matches the task type.` + templateConstraint + `
+
 ## 输出格式
 
 请严格按照以下 JSON 格式输出：
@@ -242,6 +266,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
       "description": "任务详细描述，包括具体要做什么",
       "type": "code",
       "priority": "high",
+      "template_id": "dev-template",
       "input": {
         "key": "value"
       },
@@ -255,6 +280,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
       "description": "任务描述",
       "type": "file",
       "priority": "medium",
+      "template_id": "dev-template",
       "depends_on": ["task-1"],
       "estimated_steps": 2
     }
@@ -276,6 +302,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
 3. 如果目标本身很简单，可以直接返回单个任务
 4. 最多拆分为 ` + fmt.Sprintf("%d", d.config.MaxSubTasks) + ` 个子任务
 5. 确保依赖关系不形成循环
+6. 每个任务必须指定合适的 template_id
 
 ## 示例
 
@@ -292,6 +319,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
       "description": "创建 User 结构体，包含 ID、Username、PasswordHash、Email 等字段",
       "type": "code",
       "priority": "high",
+      "template_id": "dev-template",
       "depends_on": [],
       "estimated_steps": 2
     },
@@ -301,6 +329,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
       "description": "使用 bcrypt 实现密码加密和验证函数",
       "type": "code",
       "priority": "high",
+      "template_id": "dev-template",
       "depends_on": [],
       "estimated_steps": 2
     },
@@ -310,6 +339,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
       "description": "实现登录验证逻辑，包括用户查询、密码验证、Token 生成",
       "type": "code",
       "priority": "high",
+      "template_id": "dev-template",
       "depends_on": ["task-1", "task-2"],
       "estimated_steps": 3
     },
@@ -319,6 +349,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
       "description": "实现 POST /api/login 接口，处理请求并返回 Token",
       "type": "code",
       "priority": "high",
+      "template_id": "dev-template",
       "depends_on": ["task-3"],
       "estimated_steps": 2
     },
@@ -328,6 +359,7 @@ func (d *TaskDecomposer) buildDecompositionPrompt() string {
       "description": "为登录功能编写单元测试",
       "type": "code",
       "priority": "medium",
+      "template_id": "test-template",
       "depends_on": ["task-4"],
       "estimated_steps": 3
     }

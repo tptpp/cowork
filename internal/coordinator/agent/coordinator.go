@@ -454,12 +454,13 @@ func (c *ConversationCoordinator) DecomposeTask(
 	goal string,
 	conversationID string,
 	modelCfg ModelConfig,
+	workerTemplateIDs []string,
 ) (*models.TaskGroup, error) {
 	if c.decomposer == nil {
 		return nil, fmt.Errorf("task decomposer not initialized")
 	}
 
-	return c.decomposer.DecomposeTask(ctx, goal, conversationID, modelCfg)
+	return c.decomposer.DecomposeTask(ctx, goal, conversationID, modelCfg, workerTemplateIDs)
 }
 
 // ShouldDecompose 判断是否需要拆解任务
@@ -482,8 +483,15 @@ func (c *ConversationCoordinator) ProcessWithDecomposition(
 ) (*ProcessResult, *models.TaskGroup, error) {
 	// 检查是否需要拆解
 	if c.ShouldDecompose(userMessage) {
+		// 获取 session 以获取 WorkerTemplateIDs
+		session, err := c.sessionStore.Get(sessionID)
+		var workerTemplateIDs []string
+		if err == nil && session != nil {
+			workerTemplateIDs = session.WorkerTemplateIDs
+		}
+
 		// 执行拆解
-		group, err := c.DecomposeTask(ctx, userMessage, sessionID, cfg)
+		group, err := c.DecomposeTask(ctx, userMessage, sessionID, cfg, workerTemplateIDs)
 		if err != nil {
 			log.Printf("Failed to decompose task: %v", err)
 			// 拆解失败，继续正常处理
