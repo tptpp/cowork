@@ -43,6 +43,13 @@ type SSEResponse =
   | SSEDoneResponse
   | SSEErrorResponse
 
+interface AgentTemplate {
+  id: string
+  name: string
+  description?: string
+  type: 'coordinator' | 'worker'
+}
+
 interface AgentState {
   // State
   sessions: AgentSession[]
@@ -59,9 +66,18 @@ interface AgentState {
   availableTools: ToolDefinition[]
   isExecutingTool: boolean
 
+  // Template State
+  templates: AgentTemplate[]
+  templatesLoading: boolean
+
   // Actions
   fetchSessions: () => Promise<void>
-  createSession: (model?: string, systemPrompt?: string) => Promise<AgentSession>
+  createSession: (
+    model?: string,
+    systemPrompt?: string,
+    coordinatorTemplateID?: string,
+    workerTemplateIDs?: string[]
+  ) => Promise<AgentSession>
   selectSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   sendMessage: (content: string) => Promise<void>
@@ -74,6 +90,7 @@ interface AgentState {
   approveToolCall: (toolCallId: string, approved: boolean) => Promise<void>
   fetchToolExecutions: (sessionId: string) => Promise<void>
   fetchAvailableTools: () => Promise<void>
+  fetchTemplates: () => Promise<void>
   clearError: () => void
   clearToolState: () => void
 }
@@ -94,6 +111,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   availableTools: [],
   isExecutingTool: false,
 
+  // Template Initial State
+  templates: [],
+  templatesLoading: false,
+
   // Fetch all sessions
   fetchSessions: async () => {
     set({ isLoading: true, error: null })
@@ -112,7 +133,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   // Create a new session
-  createSession: async (model = 'default', systemPrompt = '') => {
+  createSession: async (
+    model = 'default',
+    systemPrompt = '',
+    coordinatorTemplateID = 'coordinator-template',
+    workerTemplateIDs: string[] = []
+  ) => {
     set({ isLoading: true, error: null })
     try {
       const response = await fetch(`${API_BASE}/api/agent/sessions`, {
@@ -121,6 +147,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         body: JSON.stringify({
           model,
           system_prompt: systemPrompt,
+          coordinator_template_id: coordinatorTemplateID,
+          worker_template_ids: workerTemplateIDs,
         }),
       })
 
@@ -510,6 +538,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       set({ availableTools: data.data || [] })
     } catch (error) {
       console.error('Failed to fetch available tools:', error)
+    }
+  },
+
+  // Fetch available templates
+  fetchTemplates: async () => {
+    set({ templatesLoading: true })
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/templates`)
+      if (!response.ok) throw new Error('Failed to fetch templates')
+
+      const data = await response.json()
+      set({ templates: data.data || [], templatesLoading: false })
+    } catch (error) {
+      console.error('Failed to fetch templates:', error)
+      set({ templatesLoading: false })
     }
   },
 

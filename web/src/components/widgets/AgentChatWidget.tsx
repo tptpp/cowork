@@ -13,6 +13,9 @@ import {
   Paperclip,
   X,
   FileIcon,
+  Settings,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -146,6 +149,9 @@ export function AgentChatWidget() {
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [currentApprovalToolCall, setCurrentApprovalToolCall] = useState<ToolCall | null>(null)
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([])
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [coordinatorTemplate, setCoordinatorTemplate] = useState('coordinator-template')
+  const [workerTemplates, setWorkerTemplates] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -159,6 +165,8 @@ export function AgentChatWidget() {
     pendingToolCalls,
     toolExecutions,
     isExecutingTool,
+    templates,
+    templatesLoading,
     fetchSessions,
     createSession,
     selectSession,
@@ -166,6 +174,7 @@ export function AgentChatWidget() {
     sendMessageWithTools,
     approveToolCall,
     fetchAvailableTools,
+    fetchTemplates,
     clearToolState,
     error,
   } = useAgentStore()
@@ -176,7 +185,8 @@ export function AgentChatWidget() {
   useEffect(() => {
     fetchSessions()
     fetchAvailableTools()
-  }, [fetchSessions, fetchAvailableTools])
+    fetchTemplates()
+  }, [fetchSessions, fetchAvailableTools, fetchTemplates])
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -229,14 +239,14 @@ export function AgentChatWidget() {
   const handleNewSession = async () => {
     clearToolState()
     setAttachedFiles([])
-    await createSession(selectedModel)
+    await createSession(selectedModel, '', coordinatorTemplate, workerTemplates)
   }
 
   const handleModelChange = async (newModel: string) => {
     setSelectedModel(newModel)
     clearToolState()
     setAttachedFiles([])
-    await createSession(newModel)
+    await createSession(newModel, '', coordinatorTemplate, workerTemplates)
   }
 
   const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
@@ -345,6 +355,87 @@ export function AgentChatWidget() {
             <span className="text-red-700 dark:text-red-300">{error}</span>
           </div>
         )}
+
+        {/* Advanced Settings Panel */}
+        <div className="flex-shrink-0">
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>Advanced Settings</span>
+            {showAdvanced ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          {showAdvanced && (
+            <div className="mt-2 p-3 rounded-lg bg-muted/30 border text-xs space-y-3">
+              {/* Coordinator Template Selection */}
+              <div className="space-y-1">
+                <label className="text-muted-foreground font-medium">Coordinator Template</label>
+                <select
+                  value={coordinatorTemplate}
+                  onChange={(e) => setCoordinatorTemplate(e.target.value)}
+                  disabled={isStreaming || templatesLoading}
+                  className="w-full h-8 px-2 rounded-md border bg-background text-sm disabled:opacity-50"
+                >
+                  <option value="coordinator-template">Coordinator (Default)</option>
+                  {templates
+                    .filter((t) => t.type === 'coordinator' && t.id !== 'coordinator-template')
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Worker Templates Selection (Multi-select) */}
+              <div className="space-y-1">
+                <label className="text-muted-foreground font-medium">
+                  Worker Templates (Optional, Multiple)
+                </label>
+                {templatesLoading ? (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Loading templates...</span>
+                  </div>
+                ) : templates.filter((t) => t.type === 'worker').length === 0 ? (
+                  <div className="text-muted-foreground italic">No worker templates available</div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {templates
+                      .filter((t) => t.type === 'worker')
+                      .map((t) => (
+                        <label
+                          key={t.id}
+                          className="flex items-center gap-1.5 p-1.5 rounded border bg-background cursor-pointer hover:bg-muted/50 transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={workerTemplates.includes(t.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setWorkerTemplates([...workerTemplates, t.id])
+                              } else {
+                                setWorkerTemplates(workerTemplates.filter((id) => id !== t.id))
+                              }
+                            }}
+                            disabled={isStreaming}
+                            className="w-3.5 h-3.5"
+                          />
+                          <span className="truncate">{t.name}</span>
+                        </label>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Messages Area */}
         <div className="flex-1 min-h-0 border rounded-xl bg-background/50 overflow-y-auto">
