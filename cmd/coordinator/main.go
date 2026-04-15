@@ -22,6 +22,7 @@ import (
 	"github.com/tp/cowork/internal/coordinator/middleware"
 	"github.com/tp/cowork/internal/coordinator/node"
 	"github.com/tp/cowork/internal/coordinator/scheduler"
+	"github.com/tp/cowork/internal/coordinator/service"
 	"github.com/tp/cowork/internal/coordinator/store"
 	"github.com/tp/cowork/internal/coordinator/tools"
 	"github.com/tp/cowork/internal/coordinator/ws"
@@ -268,6 +269,20 @@ func main() {
 		h.SetAgentCoordinator(coordinator)
 		slog.Info("Coordinator initialized with unified Agent structure")
 	}
+
+		// 初始化系统服务
+		contextInjector := service.NewContextInjector(store.NewTaskStore(s.DB()))
+		progressMonitor := service.NewProgressMonitor(hub)
+		messageRouter := service.NewMessageRouter(
+			store.NewMessageStore(s.DB()),
+			store.NewTaskStore(s.DB()),
+		)
+
+		slog.Info("System services initialized",
+			"hasContextInjector", contextInjector != nil,
+			"hasProgressMonitor", progressMonitor != nil,
+			"hasMessageRouter", messageRouter != nil,
+		)
 
 	// 创建 Gin 路由
 	r := gin.New()
