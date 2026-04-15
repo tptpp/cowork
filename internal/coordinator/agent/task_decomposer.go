@@ -122,6 +122,7 @@ func (d *TaskDecomposer) DecomposeTask(
 			GroupID:     &group.ID,
 			Input:       dt.Input,
 			RequiredTags: models.StringArray(dt.RequiredTags),
+			TemplateID:  dt.TemplateID,
 		}
 
 		if task.Priority == "" {
