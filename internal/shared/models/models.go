@@ -592,6 +592,9 @@ type DecomposedTask struct {
 	DependsOn   []string               `json:"depends_on,omitempty"` // 依赖的任务 ID
 	RequiredTags []string              `json:"required_tags,omitempty"`
 	EstimatedSteps int                 `json:"estimated_steps,omitempty"`
+
+	// 新增
+	TemplateID string `json:"template_id,omitempty"` // LLM 推断的角色模板
 }
 
 // DecompositionResult 任务拆解结果
