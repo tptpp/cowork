@@ -444,6 +444,32 @@ func (e *ToolExecutor) shouldUseDocker(toolDef *models.ToolDefinition, args map[
 	return false
 }
 
+// checkToolPermission 检查工具权限
+func (e *ToolExecutor) checkToolPermission(toolName string, template *models.AgentTemplate) error {
+	// 1. 检查黑名单
+	for _, t := range template.RestrictedTools {
+		if t == toolName {
+			return fmt.Errorf("tool '%s' is restricted for template '%s'", toolName, template.ID)
+		}
+	}
+
+	// 2. 检查白名单 (如果有定义)
+	if len(template.AllowedTools) > 0 {
+		allowed := false
+		for _, t := range template.AllowedTools {
+			if t == toolName {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("tool '%s' not in allowed list for template '%s'", toolName, template.ID)
+		}
+	}
+
+	return nil
+}
+
 // ExecuteToolFromTask 从任务模型执行工具
 func (e *ToolExecutor) ExecuteToolFromTask(task *models.Task, callback Callback) *TaskResult {
 	// 从任务中提取工具信息

@@ -100,6 +100,20 @@ type TaskLogRequest struct {
 	Message string `json:"message"`
 }
 
+// ApprovalRequest 审批请求
+type ApprovalRequest struct {
+	TaskID    string                 `json:"task_id"`
+	ToolName  string                 `json:"tool_name"`
+	Arguments map[string]interface{} `json:"arguments"`
+	RiskLevel string                 `json:"risk_level"`
+}
+
+// ApprovalResponse 审批响应
+type ApprovalResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"` // pending, approved, rejected
+}
+
 // Register 注册 Worker
 func (c *CoordinatorClient) Register(name string, tags []string, maxConcurrent int, description string, capabilities map[string]interface{}) (*RegisterResponse, error) {
 	payload := map[string]interface{}{
@@ -253,6 +267,69 @@ func (c *CoordinatorClient) SendTaskLog(taskID string, level, message string) er
 	defer resp.Body.Close()
 
 	return nil
+}
+
+// RequestApproval 请求审批
+func (c *CoordinatorClient) RequestApproval(taskID string, toolName string, args map[string]interface{}) (*ApprovalResponse, error) {
+	req := ApprovalRequest{
+		TaskID:    taskID,
+		ToolName:  toolName,
+		Arguments: args,
+		RiskLevel: "high",
+	}
+
+	body, _ := json.Marshal(req)
+	httpReq, _ := http.NewRequest("POST", c.baseURL+"/api/approvals", bytes.NewReader(body))
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result ApprovalResponse
+	json.NewDecoder(resp.Body).Decode(&result)
+	return &result, nil
+}
+
+// GetApproval 查询审批状态
+func (c *CoordinatorClient) GetApproval(approvalID string) (*ApprovalResponse, error) {
+	httpReq, _ := http.NewRequest("GET", c.baseURL+"/api/approvals/"+approvalID, nil)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result ApprovalResponse
+	json.NewDecoder(resp.Body).Decode(&result)
+	return &result, nil
+}
+
+// WaitApproval 等待审批结果（轮询）
+func (c *CoordinatorClient) WaitApproval(approvalID string, timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		result, err := c.GetApproval(approvalID)
+		if err != nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		switch result.Status {
+		case "approved":
+			return true, nil
+		case "rejected":
+			return false, fmt.Errorf("approval rejected")
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	return false, fmt.Errorf("approval timeout")
 }
 
 // Worker 工作节点
