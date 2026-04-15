@@ -121,6 +121,12 @@ func autoMigrate(db *gorm.DB) error {
 		&models.ToolExecution{},
 		&models.TaskGroup{},
 		&models.TaskDependency{},
+		// 新增模型
+		&models.Node{},
+		&models.AgentTemplate{},
+		&models.Message{},
+		&models.ApprovalRequest{},
+		&models.ApprovalPolicy{},
 	)
 }
 
@@ -982,4 +988,403 @@ func (s *taskFileStore) ListByTask(taskID string) ([]models.TaskFile, error) {
 // Delete 删除文件记录
 func (s *taskFileStore) Delete(id uint) error {
 	return s.db.Delete(&models.TaskFile{}, id).Error
+}
+
+// ========== Node Store ==========
+
+// NodeStore 节点存储接口
+type NodeStore interface {
+	Create(node *models.Node) error
+	Get(id string) (*models.Node, error)
+	GetByName(name string) (*models.Node, error)
+	List() ([]models.Node, error)
+	ListByStatus(status models.NodeStatus) ([]models.Node, error)
+	ListByCapabilities(capabilities []string) ([]models.Node, error)
+	Update(node *models.Node) error
+	Delete(id string) error
+	UpdateStatus(id string, status models.NodeStatus, currentAgentID *string) error
+	UpdateHeartbeat(id string) error
+	CountByStatus() (map[models.NodeStatus]int64, error)
+}
+
+type nodeStore struct {
+	db *gorm.DB
+}
+
+func NewNodeStore(db *gorm.DB) NodeStore {
+	return &nodeStore{db: db}
+}
+
+func (s *nodeStore) Create(node *models.Node) error {
+	return s.db.Create(node).Error
+}
+
+func (s *nodeStore) Get(id string) (*models.Node, error) {
+	var node models.Node
+	err := s.db.First(&node, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &node, nil
+}
+
+func (s *nodeStore) GetByName(name string) (*models.Node, error) {
+	var node models.Node
+	err := s.db.First(&node, "name = ?", name).Error
+	if err != nil {
+		return nil, err
+	}
+	return &node, nil
+}
+
+func (s *nodeStore) List() ([]models.Node, error) {
+	var nodes []models.Node
+	err := s.db.Order("created_at DESC").Find(&nodes).Error
+	return nodes, err
+}
+
+func (s *nodeStore) ListByStatus(status models.NodeStatus) ([]models.Node, error) {
+	var nodes []models.Node
+	err := s.db.Where("status = ?", status).Find(&nodes).Error
+	return nodes, err
+}
+
+func (s *nodeStore) ListByCapabilities(capabilities []string) ([]models.Node, error) {
+	var nodes []models.Node
+	err := s.db.Find(&nodes).Error
+	if err != nil {
+		return nil, err
+	}
+
+	var result []models.Node
+	for _, node := range nodes {
+		hasAll := true
+		for _, cap := range capabilities {
+			if !node.Capabilities[cap] {
+				hasAll = false
+				break
+			}
+		}
+		if hasAll {
+			result = append(result, node)
+		}
+	}
+	return result, nil
+}
+
+func (s *nodeStore) Update(node *models.Node) error {
+	return s.db.Save(node).Error
+}
+
+func (s *nodeStore) Delete(id string) error {
+	return s.db.Delete(&models.Node{}, "id = ?", id).Error
+}
+
+func (s *nodeStore) UpdateStatus(id string, status models.NodeStatus, currentAgentID *string) error {
+	updates := map[string]interface{}{
+		"status": status,
+	}
+	if currentAgentID != nil {
+		updates["current_agent_id"] = *currentAgentID
+	} else {
+		updates["current_agent_id"] = nil
+	}
+	return s.db.Model(&models.Node{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (s *nodeStore) UpdateHeartbeat(id string) error {
+	return s.db.Model(&models.Node{}).Where("id = ?", id).Update("last_seen", gorm.Expr("datetime('now')")).Error
+}
+
+func (s *nodeStore) CountByStatus() (map[models.NodeStatus]int64, error) {
+	type StatusCount struct {
+		Status models.NodeStatus
+		Count  int64
+	}
+	var results []StatusCount
+	err := s.db.Model(&models.Node{}).Select("status, count(*) as count").Group("status").Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[models.NodeStatus]int64)
+	for _, r := range results {
+		counts[r.Status] = r.Count
+	}
+	return counts, nil
+}
+
+// ========== Message Store ==========
+
+type MessageStore interface {
+	Create(msg *models.Message) error
+	Get(id string) (*models.Message, error)
+	ListByToAgent(toAgent string, limit int) ([]models.Message, error)
+	ListByFromAgent(fromAgent string, limit int) ([]models.Message, error)
+	ListPending(toAgent string) ([]models.Message, error)
+	Update(msg *models.Message) error
+	UpdateStatus(id string, status models.MessageStatus) error
+	MarkDelivered(id string) error
+	MarkResponded(id string, response string) error
+}
+
+type messageStore struct {
+	db *gorm.DB
+}
+
+func NewMessageStore(db *gorm.DB) MessageStore {
+	return &messageStore{db: db}
+}
+
+func (s *messageStore) Create(msg *models.Message) error {
+	return s.db.Create(msg).Error
+}
+
+func (s *messageStore) Get(id string) (*models.Message, error) {
+	var msg models.Message
+	err := s.db.First(&msg, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+func (s *messageStore) ListByToAgent(toAgent string, limit int) ([]models.Message, error) {
+	var msgs []models.Message
+	query := s.db.Where("to_agent = ?", toAgent).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&msgs).Error
+	return msgs, err
+}
+
+func (s *messageStore) ListByFromAgent(fromAgent string, limit int) ([]models.Message, error) {
+	var msgs []models.Message
+	query := s.db.Where("from_agent = ?", fromAgent).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&msgs).Error
+	return msgs, err
+}
+
+func (s *messageStore) ListPending(toAgent string) ([]models.Message, error) {
+	var msgs []models.Message
+	err := s.db.Where("to_agent = ? AND status = ?", toAgent, models.MessageStatusPending).
+		Order("created_at ASC").Find(&msgs).Error
+	return msgs, err
+}
+
+func (s *messageStore) Update(msg *models.Message) error {
+	return s.db.Save(msg).Error
+}
+
+func (s *messageStore) UpdateStatus(id string, status models.MessageStatus) error {
+	return s.db.Model(&models.Message{}).Where("id = ?", id).Update("status", status).Error
+}
+
+func (s *messageStore) MarkDelivered(id string) error {
+	now := time.Now()
+	return s.db.Model(&models.Message{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":      models.MessageStatusDelivered,
+		"delivered_at": &now,
+	}).Error
+}
+
+func (s *messageStore) MarkResponded(id string, response string) error {
+	now := time.Now()
+	return s.db.Model(&models.Message{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":      models.MessageStatusResponded,
+		"response":    response,
+		"responded_at": &now,
+	}).Error
+}
+
+// ========== AgentTemplate Store ==========
+
+type AgentTemplateStore interface {
+	Create(template *models.AgentTemplate) error
+	Get(id string) (*models.AgentTemplate, error)
+	GetByName(name string) (*models.AgentTemplate, error)
+	List() ([]models.AgentTemplate, error)
+	ListSystem() ([]models.AgentTemplate, error)
+	ListByUser(userID string) ([]models.AgentTemplate, error)
+	Update(template *models.AgentTemplate) error
+	Delete(id string) error
+}
+
+type agentTemplateStore struct {
+	db *gorm.DB
+}
+
+func NewAgentTemplateStore(db *gorm.DB) AgentTemplateStore {
+	return &agentTemplateStore{db: db}
+}
+
+func (s *agentTemplateStore) Create(template *models.AgentTemplate) error {
+	return s.db.Create(template).Error
+}
+
+func (s *agentTemplateStore) Get(id string) (*models.AgentTemplate, error) {
+	var template models.AgentTemplate
+	err := s.db.First(&template, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &template, nil
+}
+
+func (s *agentTemplateStore) GetByName(name string) (*models.AgentTemplate, error) {
+	var template models.AgentTemplate
+	err := s.db.First(&template, "name = ?", name).Error
+	if err != nil {
+		return nil, err
+	}
+	return &template, nil
+}
+
+func (s *agentTemplateStore) List() ([]models.AgentTemplate, error) {
+	var templates []models.AgentTemplate
+	err := s.db.Order("is_system DESC, name ASC").Find(&templates).Error
+	return templates, err
+}
+
+func (s *agentTemplateStore) ListSystem() ([]models.AgentTemplate, error) {
+	var templates []models.AgentTemplate
+	err := s.db.Where("is_system = ?", true).Order("name ASC").Find(&templates).Error
+	return templates, err
+}
+
+func (s *agentTemplateStore) ListByUser(userID string) ([]models.AgentTemplate, error) {
+	var templates []models.AgentTemplate
+	err := s.db.Where("created_by = ?", userID).Order("name ASC").Find(&templates).Error
+	return templates, err
+}
+
+func (s *agentTemplateStore) Update(template *models.AgentTemplate) error {
+	return s.db.Save(template).Error
+}
+
+func (s *agentTemplateStore) Delete(id string) error {
+	return s.db.Delete(&models.AgentTemplate{}, "id = ?", id).Error
+}
+
+// ========== Approval Store ==========
+
+type ApprovalRequestStore interface {
+	Create(req *models.ApprovalRequest) error
+	Get(id string) (*models.ApprovalRequest, error)
+	ListPending(limit int) ([]models.ApprovalRequest, error)
+	ListByAgent(agentID string, limit int) ([]models.ApprovalRequest, error)
+	Update(req *models.ApprovalRequest) error
+	Approve(id string, userID string) error
+	Reject(id string, userID string) error
+	MarkExpired(id string) error
+}
+
+type approvalRequestStore struct {
+	db *gorm.DB
+}
+
+func NewApprovalRequestStore(db *gorm.DB) ApprovalRequestStore {
+	return &approvalRequestStore{db: db}
+}
+
+func (s *approvalRequestStore) Create(req *models.ApprovalRequest) error {
+	return s.db.Create(req).Error
+}
+
+func (s *approvalRequestStore) Get(id string) (*models.ApprovalRequest, error) {
+	var req models.ApprovalRequest
+	err := s.db.First(&req, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (s *approvalRequestStore) ListPending(limit int) ([]models.ApprovalRequest, error) {
+	var reqs []models.ApprovalRequest
+	query := s.db.Where("status = ?", models.ApprovalStatusPending).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&reqs).Error
+	return reqs, err
+}
+
+func (s *approvalRequestStore) ListByAgent(agentID string, limit int) ([]models.ApprovalRequest, error) {
+	var reqs []models.ApprovalRequest
+	query := s.db.Where("agent_id = ?", agentID).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Find(&reqs).Error
+	return reqs, err
+}
+
+func (s *approvalRequestStore) Update(req *models.ApprovalRequest) error {
+	return s.db.Save(req).Error
+}
+
+func (s *approvalRequestStore) Approve(id string, userID string) error {
+	now := time.Now()
+	return s.db.Model(&models.ApprovalRequest{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     models.ApprovalStatusApproved,
+		"user_id":    userID,
+		"resolved_at": &now,
+	}).Error
+}
+
+func (s *approvalRequestStore) Reject(id string, userID string) error {
+	now := time.Now()
+	return s.db.Model(&models.ApprovalRequest{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     models.ApprovalStatusRejected,
+		"user_id":    userID,
+		"resolved_at": &now,
+	}).Error
+}
+
+func (s *approvalRequestStore) MarkExpired(id string) error {
+	now := time.Now()
+	return s.db.Model(&models.ApprovalRequest{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     models.ApprovalStatusExpired,
+		"resolved_at": &now,
+	}).Error
+}
+
+type ApprovalPolicyStore interface {
+	Create(policy *models.ApprovalPolicy) error
+	Get(userID string) (*models.ApprovalPolicy, error)
+	Update(policy *models.ApprovalPolicy) error
+	Delete(userID string) error
+}
+
+type approvalPolicyStore struct {
+	db *gorm.DB
+}
+
+func NewApprovalPolicyStore(db *gorm.DB) ApprovalPolicyStore {
+	return &approvalPolicyStore{db: db}
+}
+
+func (s *approvalPolicyStore) Create(policy *models.ApprovalPolicy) error {
+	return s.db.Create(policy).Error
+}
+
+func (s *approvalPolicyStore) Get(userID string) (*models.ApprovalPolicy, error) {
+	var policy models.ApprovalPolicy
+	err := s.db.First(&policy, "user_id = ?", userID).Error
+	if err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+func (s *approvalPolicyStore) Update(policy *models.ApprovalPolicy) error {
+	return s.db.Save(policy).Error
+}
+
+func (s *approvalPolicyStore) Delete(userID string) error {
+	return s.db.Delete(&models.ApprovalPolicy{}, "user_id = ?", userID).Error
 }
