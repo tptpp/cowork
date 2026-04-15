@@ -80,17 +80,17 @@ func (c *ConversationCoordinator) ProcessMessage(
 		return nil, fmt.Errorf("failed to get history: %w", err)
 	}
 
-	// 获取会话信息
-	session, err := c.sessionStore.Get(sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
-	}
-
 	// 转换消息格式
 	chatMessages := ConvertToAgentMessages(messages)
 
+	// 确保会话存在 (不再需要读取字段，模板加载将在 Task 8 实现)
+	if _, err := c.sessionStore.Get(sessionID); err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
 	// 处理多轮对话
-	return c.processWithToolCalls(ctx, sessionID, cfg, session.SystemPrompt, chatMessages, toolNames, onToken)
+	// TODO: Load systemPrompt from CoordinatorTemplate (Task 8)
+	return c.processWithToolCalls(ctx, sessionID, cfg, "", chatMessages, toolNames, onToken)
 }
 
 // ProcessResult 处理结果

@@ -180,11 +180,10 @@ func getEnvOrDefault(key, defaultValue string) string {
 
 // CreateAgentSessionRequest 创建 Agent 会话请求
 type CreateAgentSessionRequest struct {
-	Model        string      `json:"model"`
-	SystemPrompt string      `json:"system_prompt"`
-	Context      models.JSON `json:"context"`
-	TaskID       *string     `json:"task_id"`
-	Config       models.JSON `json:"config"`
+	CoordinatorTemplateID string          `json:"coordinator_template_id"` // 可选，默认 coordinator-template
+	WorkerTemplateIDs     models.StringArray `json:"worker_template_ids"`     // 可选，空数组=自动
+	Context               models.JSON    `json:"context"`
+	TaskID                *string        `json:"task_id"`
 }
 
 // CreateAgentSession 创建 Agent 会话
@@ -195,18 +194,17 @@ func (h *AgentHandler) CreateAgentSession(c *gin.Context) {
 		return
 	}
 
-	// 设置默认模型
-	if req.Model == "" {
-		req.Model = "default"
+	// 设置默认 Coordinator 模板
+	if req.CoordinatorTemplateID == "" {
+		req.CoordinatorTemplateID = "coordinator-template"
 	}
 
 	session := &models.AgentSession{
-		ID:           uuid.New().String(),
-		Model:        req.Model,
-		SystemPrompt: req.SystemPrompt,
-		Context:      req.Context,
-		TaskID:       req.TaskID,
-		Config:       req.Config,
+		ID:                    uuid.New().String(),
+		CoordinatorTemplateID: req.CoordinatorTemplateID,
+		WorkerTemplateIDs:     req.WorkerTemplateIDs,
+		Context:               req.Context,
+		TaskID:                req.TaskID,
 	}
 
 	if err := h.store.Create(session); err != nil {
@@ -271,8 +269,7 @@ func (h *AgentHandler) SendAgentMessage(c *gin.Context) {
 	sessionID := c.Param("id")
 
 	// 检查会话是否存在
-	session, err := h.store.Get(sessionID)
-	if err != nil {
+	if _, err := h.store.Get(sessionID); err != nil {
 		failWithError(c, errors.SessionNotFound(sessionID))
 		return
 	}
@@ -284,8 +281,7 @@ func (h *AgentHandler) SendAgentMessage(c *gin.Context) {
 	}
 
 	// 保存用户消息
-	_, err = h.store.AddMessage(sessionID, "user", req.Content)
-	if err != nil {
+	if _, err := h.store.AddMessage(sessionID, "user", req.Content); err != nil {
 		failWithError(c, errors.WrapInternal("Failed to save message", err))
 		return
 	}
@@ -304,7 +300,8 @@ func (h *AgentHandler) SendAgentMessage(c *gin.Context) {
 	c.Header("Access-Control-Allow-Origin", "*")
 
 	// 调用模型路由进行流式响应
-	fullResponse, err := h.streamChat(c, h.modelRouter, session.Model, messages, session.SystemPrompt)
+	// TODO: Load model and systemPrompt from CoordinatorTemplate (Task 8)
+	fullResponse, err := h.streamChat(c, h.modelRouter, "default", messages, "")
 	if err != nil {
 		c.SSEvent("message", StreamResponse{Type: "error", Content: err.Error()})
 		c.Writer.Flush()
@@ -686,10 +683,11 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 	c.Header("Access-Control-Allow-Origin", "*")
 
 	// 获取模型配置
-	cfg, ok := h.modelRouter.GetConfig(session.Model)
+	// TODO: Load model config from CoordinatorTemplate (Task 8)
+	cfg, ok := h.modelRouter.GetConfig("default")
 	if !ok {
 		// 没有配置，使用模拟响应
-		h.mockStreamResponseWithTools(c, session.Model, req.Content)
+		h.mockStreamResponseWithTools(c, "default", req.Content)
 		return
 	}
 
@@ -776,7 +774,8 @@ func (h *AgentHandler) streamWithoutFunctionCalling(c *gin.Context, session *mod
 	}
 
 	// 调用模型
-	fullResponse, err := h.streamChat(c, h.modelRouter, session.Model, messages, session.SystemPrompt)
+	// TODO: Load model and systemPrompt from CoordinatorTemplate (Task 8)
+	fullResponse, err := h.streamChat(c, h.modelRouter, "default", messages, "")
 	if err != nil {
 		c.SSEvent("message", StreamResponse{Type: "error", Content: err.Error()})
 		c.Writer.Flush()
