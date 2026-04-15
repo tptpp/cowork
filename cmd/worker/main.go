@@ -861,11 +861,6 @@ When executing tasks:
 Always be helpful, accurate, and safe in your operations.`, workerName)
 }
 
-// readFile 辅助函数
-func readFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
 // RemoteToolRegistry 远程工具注册表客户端
 type RemoteToolRegistry struct {
 	baseURL    string

@@ -705,13 +705,13 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 		toolNames = h.registry.GetToolNames()
 	}
 
-	// 使用协调器处理 (支持 Function Calling)
+	// 使用协调器处理 (支持 Function Calling + 任务拆解)
 	onToken := func(token string) {
 		c.SSEvent("message", StreamResponse{Type: "token", Content: token})
 		c.Writer.Flush()
 	}
 
-	result, err := h.coordinator.ProcessMessage(
+	result, taskGroup, err := h.coordinator.ProcessWithDecomposition(
 		c.Request.Context(),
 		sessionID,
 		content,
@@ -731,6 +731,15 @@ func (h *AgentHandler) SendAgentMessageWithTools(c *gin.Context) {
 		return
 	}
 
+		// 如果任务被拆解，发送任务组信息
+		if taskGroup != nil {
+			c.SSEvent("message", map[string]interface{}{
+				"type":       "task_decomposed",
+				"task_group": taskGroup,
+				"total_tasks": taskGroup.TotalTasks,
+			})
+			c.Writer.Flush()
+		}
 	// 发送工具调用信息
 	if len(result.ToolCalls) > 0 {
 		c.SSEvent("message", map[string]interface{}{

@@ -243,7 +243,7 @@ func main() {
 		h.SetAIConfig(modelType, coordCfg.AIBaseURL, coordCfg.AIModel, coordCfg.AIAPIKey)
 		slog.Info("AI config loaded from file", "type", modelType, "model", coordCfg.AIModel)
 
-		// 初始化 ConversationCoordinator（支持 Function Calling）
+		// 初始化 ConversationCoordinator（支持 Function Calling + 任务拆解）
 		engine := agent.NewFunctionCallingEngine(
 			toolRegistry,
 			store.NewToolExecutionStore(s.DB()),
@@ -267,15 +267,22 @@ func main() {
 		agentToolScheduler.Start(context.Background())
 		slog.Info("Tool scheduler started")
 
-		coordinator := agent.NewConversationCoordinator(
+		// 使用带任务拆解功能的 Coordinator
+		coordinator := agent.NewConversationCoordinatorWithDecomposer(
 			engine,
 			agentToolScheduler,
 			store.NewAgentSessionStore(s.DB()),
 			store.NewToolExecutionStore(s.DB()),
 			toolRegistry,
+			store.NewTaskStore(s.DB()),
+			store.NewTaskGroupStore(s.DB()),
+			store.NewTaskDependencyStore(s.DB()),
+			agent.CoordinatorConfig{
+				MaxToolRounds: 10,
+			},
 		)
 		h.SetAgentCoordinator(coordinator)
-		slog.Info("Agent coordinator initialized with Function Calling support")
+		slog.Info("Agent coordinator initialized with Function Calling + Task Decomposition support")
 	}
 
 	// 创建 Gin 路由
