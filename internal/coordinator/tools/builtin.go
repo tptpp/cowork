@@ -49,7 +49,7 @@ func GetBuiltinTools() []*models.ToolDefinition {
 				"required": []string{"path"},
 			},
 			Category:    models.ToolCategoryFile,
-			ExecuteMode: models.ToolExecuteModeRemote,
+			ExecuteMode: models.ToolExecuteModeLocal,
 			Permission:  models.ToolPermissionRead,
 			Handler:     "read_file",
 			IsEnabled:   true,
