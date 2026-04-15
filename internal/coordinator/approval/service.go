@@ -107,6 +107,11 @@ func (s *Service) Reject(ctx context.Context, reqID string, userID string) error
 	return s.reqStore.Reject(reqID, userID)
 }
 
+// Get 获取审批请求
+func (s *Service) Get(reqID string) (*models.ApprovalRequest, error) {
+	return s.reqStore.Get(reqID)
+}
+
 // ListPending 列出待审批请求
 func (s *Service) ListPending(ctx context.Context, limit int) ([]models.ApprovalRequest, error) {
 	return s.reqStore.ListPending(limit)
