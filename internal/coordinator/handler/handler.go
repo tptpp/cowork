@@ -305,7 +305,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 	}
 
 		// 依赖关系说明:
-		// - 任务拆解时 Agent 通过 TaskDecomposer 自动创建依赖 (已实现)
+		// - 任务拆解时 Agent 通过 create_task 工具自动创建依赖 (已实现)
 		// - 用户手动创建任务时的依赖处理需添加 depStore 注入 (待实现)
 
 	success(c, task)

@@ -129,7 +129,7 @@
    POST /api/tasks
    { "type": "development", "description": "..." }
 
-2. Gateway 创建任务，状态为 pending
+2. Coordinator 创建任务，状态为 pending
    Task { id: "task-101", status: "pending", ... }
 
 3. Scheduler 定期检查待分配任务
@@ -142,13 +142,13 @@
    - 执行任务逻辑
    - 定期发送心跳（含进度）
 
-5. Gateway 收集心跳，更新任务状态
+5. Coordinator 收集心跳，更新任务状态
    - 更新数据库中的进度
    - 通过 WebSocket 推送给订阅的客户端
 
 6. 任务完成
    - Worker 上报结果
-   - Gateway 更新状态为 completed/failed
+   - Coordinator 更新状态为 completed/failed
    - 存储输出文件
    - 推送通知
 ```
@@ -158,11 +158,11 @@
 ```
 Worker 启动流程：
 
-1. Worker 启动，连接 Gateway
+1. Worker 启动，连接 Coordinator
    POST /api/workers/register
    { "name": "worker-1", "tags": ["dev"], "model": "gpt-4", "max_concurrent": 3 }
 
-2. Gateway 注册 Worker
+2. Coordinator 注册 Worker
    - 分配 Worker ID
    - 存储到数据库
    - 加入调度池
@@ -177,7 +177,7 @@ Worker 启动流程：
      "resources": { "cpu": 30, "memory": 512 }
    }
 
-4. Gateway 处理心跳
+4. Coordinator 处理心跳
    - 更新 Worker 状态
    - 更新关联任务的进度
    - 推送 WebSocket 更新
@@ -202,7 +202,7 @@ Agent 对话流程：
    POST /api/agent/chat
    { "session_id": "sess-123", "message": "帮我分析这段代码" }
 
-3. Gateway 调用 LLM API（流式）
+3. Coordinator 调用 LLM API（流式）
    - 路由到配置的模型 API
    - 启用流式响应 (stream: true)
 
@@ -235,7 +235,7 @@ Agent 对话流程：
 │     │                                                                │
 │     │ 心跳 (HTTP)                                                   │
 │     ▼                                                                │
-│   Gateway ──────────────────────────────────────────────────────┐   │
+│   Coordinator ──────────────────────────────────────────────────────┐   │
 │     │                                                            │   │
 │     │ 1. 更新数据库                                              │   │
 │     │ 2. 推送到 WebSocket Hub                                    │   │
@@ -282,7 +282,7 @@ type Channel =
 ```
 单机部署：
 ┌─────────────────────────────────────────────┐
-│  Gateway + SQLite + 多个本地 Worker         │
+│  Coordinator + SQLite + 多个本地 Worker     │
 └─────────────────────────────────────────────┘
 
 多机部署：
@@ -296,7 +296,7 @@ type Channel =
        │
 ┌──────┴───────┬──────────────┬──────────────┐
 ▼              ▼              ▼              ▼
-Gateway 1   Gateway 2    Gateway 3    Gateway N
+Coordinator 1 Coordinator 2 Coordinator 3 Coordinator N
     │            │            │            │
     └────────────┴────────────┴────────────┘
                         │
@@ -360,13 +360,13 @@ type Executor interface {
 认证方案（可选）：
 
 1. API Key 认证
-   - Gateway 和 Worker 之间
+   - Coordinator 和 Worker 之间
    - 请求头: Authorization: Bearer <api_key>
 
 2. JWT 认证（多用户）
    - 用户登录获取 JWT
    - 请求携带 JWT
-   - Gateway 验证 JWT 并提取用户信息
+   - Coordinator 验证 JWT 并提取用户信息
 
 授权模型：
 
@@ -454,7 +454,6 @@ cowork_websocket_connections_active 5
 ### 7.1 故障恢复
 
 ```
-Gateway 故障：
 Coordinator 故障：
 - 无状态设计，可快速重启
 - SQLite 数据持久化
@@ -474,19 +473,19 @@ Worker 故障：
 ### 7.2 优雅关闭
 
 ```go
-// Gateway 优雅关闭
-func (g *Gateway) Shutdown(ctx context.Context) error {
+// Coordinator 优雅关闭
+func (c *Coordinator) Shutdown(ctx context.Context) error {
     // 1. 停止接受新连接
-    g.httpServer.Shutdown(ctx)
+    c.httpServer.Shutdown(ctx)
     
     // 2. 通知所有 Worker 暂停
-    g.broadcastWorkerPause()
+    c.broadcastWorkerPause()
     
     // 3. 等待运行中任务完成或超时
-    g.waitForTasks(ctx, 30*time.Second)
+    c.waitForTasks(ctx, 30*time.Second)
     
     // 4. 保存状态
-    g.store.Save()
+    c.store.Save()
     
     return nil
 }

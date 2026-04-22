@@ -1,5 +1,13 @@
 # Agent Template Integration Implementation Plan
 
+> **Status: SUPERSEDED (2026-04-16)**
+>
+> This plan is outdated due to the Agent Architecture Simplification project.
+> TaskDecomposer, ToolScheduler, and FunctionCallingEngine have been deleted.
+>
+> See `docs/superpowers/specs/2026-04-16-agent-architecture-simplification-design.md` for the new architecture.
+> Template integration is now handled by the unified Agent structure in `internal/coordinator/agent/agent.go`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Integrate AgentTemplate into the actual execution flow for role-based permissions, model config, and approval handling.

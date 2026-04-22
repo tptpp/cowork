@@ -14,7 +14,7 @@
 ## Phase 1：基础架构（预计 1-2 周）✅ 已完成
 
 ### 目标
-搭建可运行的骨架，实现 Gateway-Worker 通信基础。
+搭建可运行的骨架，实现 Coordinator-Worker 通信基础。
 
 ### 后端任务
 
@@ -22,7 +22,7 @@
 |------|--------|----------|------|
 | 项目初始化（go mod、目录结构） | P0 | 0.5 天 | ✅ |
 | 数据库模型 + GORM 集成 | P0 | 0.5 天 | ✅ |
-| Gateway HTTP 服务（Gin/Echo） | P0 | 0.5 天 | ✅ |
+| Coordinator HTTP 服务（Gin/Echo） | P0 | 0.5 天 | ✅ |
 | WebSocket Hub 实现 | P0 | 1 天 | ✅ |
 | Worker 注册/心跳 API | P0 | 0.5 天 | ✅ |
 | Worker 客户端实现 | P0 | 0.5 天 | ✅ |
@@ -37,8 +37,8 @@
 | WebSocket 客户端 Hook | P0 | 0.5 天 | ✅ |
 
 ### 里程碑
-- [x] Gateway 启动，访问 `/api/system/stats` 返回数据
-- [x] Worker 启动，Gateway 显示 Worker 在线
+- [x] Coordinator 启动，访问 `/api/system/stats` 返回数据
+- [x] Worker 启动，Coordinator 显示 Worker 在线
 - [x] 前端启动，显示系统状态（从 API 获取）
 
 ---
@@ -161,7 +161,7 @@
 | 功能 | 优先级 | 说明 |
 |------|--------|------|
 | Docker Worker | P2 | 每任务一个容器，完全隔离 |
-| 任务依赖/工作流 | ✅ 已实现 | 多任务编排、TaskDecomposer |
+| 任务依赖/工作流 | ✅ 已实现 | 多任务编排、Agent 调用 create_task 工具 |
 | 任务优先级队列 | P2 | 抢占式调度 |
 | 用户认证 | P3 | 多用户支持 |
 | 资源限制 | P2 | CPU/内存限制 |
