@@ -1,5 +1,14 @@
 # Agent 架构简化实现计划
 
+> **Status: COMPLETED (2026-04-16)**
+>
+> 所有任务已完成。架构简化成功实现：
+> - agent.go (~466行) - 统一 Agent 结构
+> - llm_client.go (~496行) - LLM API 客户端
+> - coordinator.go - Coordinator 包装器
+> - service/ - 系统服务层（ContextInjector, ProgressMonitor, MessageRouter）
+> - 删除 TaskDecomposer, ToolScheduler, FunctionCallingEngine
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 简化 Agent 架构，统一 Coordinator 和执行者为单一 Agent 结构，差异由模板定义，系统服务处理自动化流程。

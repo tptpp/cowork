@@ -1,5 +1,14 @@
 # Cowork 任务协作平台重构实现计划
 
+> **Status: PARTIALLY SUPERSEDED (2026-04-16)**
+>
+> 此计划的架构设计（Coordinator Agent、节点 Agent、消息路由）仍然有效，
+> 但具体实现方式已被 Agent Architecture Simplification 项目简化：
+> - TaskDecomposer、ToolScheduler 已删除
+> - Agent 结构统一为 agent.go + llm_client.go
+>
+> 请参考 `docs/superpowers/specs/2026-04-16-agent-architecture-simplification-design.md` 了解当前实现。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 重构 Cowork 为分布式任务协作平台，实现 Agent ID = Task ID 统一身份模型、Agent 间通信、依赖管理、进度可视化等核心能力。

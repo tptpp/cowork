@@ -1,5 +1,15 @@
 # Cowork 任务协作平台重构设计
 
+> **Status: PARTIALLY SUPERSEDED (2026-04-16)**
+>
+> 此设计文档的核心概念（Coordinator Agent、节点 Agent、消息路由、继承链）仍然有效。
+> 但具体组件实现已被 Agent Architecture Simplification 项目简化：
+> - TaskDecomposer → Agent 调用 create_task 工具
+> - ToolScheduler → 直接 Worker 机制
+> - FunctionCallingEngine → 合并到 Agent + LLMClient
+>
+> 请参考 `docs/superpowers/specs/2026-04-16-agent-architecture-simplification-design.md` 了解当前实现架构。
+
 ## 一、项目背景
 
 ### 原始诉求
