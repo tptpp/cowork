@@ -1,5 +1,18 @@
 # Cowork 项目优化建议报告
 
+> **Status: OUTDATED (2026-04-16)**
+>
+> 此报告基于 2026-03-20 的架构分析，当时使用 Gateway-Worker 分布式架构。
+>
+> 2026-04-16 完成 Agent Architecture Simplification 重构后：
+> - Gateway → Coordinator（统一命名）
+> - TaskDecomposer、ToolScheduler、FunctionCallingEngine 已删除
+> - 采用三层架构：Agent 层 → 系统服务层 → 数据层
+>
+> 请参考 `docs/superpowers/specs/2026-04-16-agent-architecture-simplification-design.md` 了解当前架构。
+>
+> 此报告中的优化建议可能已部分实施或不再适用。
+
 > 生成日期：2026-03-20
 > 分析范围：架构设计、后端代码、前端代码、部署配置
 
