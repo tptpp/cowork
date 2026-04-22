@@ -77,13 +77,23 @@ cowork/
 │   └── worker/            # Worker 主程序入口
 ├── internal/
 │   ├── coordinator/
-│   │   ├── api/           # REST API 处理
+│   │   ├── agent/         # Agent 核心模块
+│   │   │   ├── agent.go   # 统一 Agent 结构
+│   │   │   ├── llm_client.go  # LLM API 客户端
+│   │   │   ├── coordinator.go # Coordinator 包装器
+│   │   │   └── template.go    # 模板管理
+│   │   ├── service/       # 系统服务层
+│   │   │   ├── context_injector.go  # 上下文注入
+│   │   │   ├── progress_monitor.go  # 进度监控
+│   │   │   ├── message_router.go    # 消息路由
+│   │   │   ├── task_scheduler.go    # 任务调度
+│   │   │   └── node_assigner.go     # 节点分配
 │   │   ├── ws/            # WebSocket 处理
-│   │   ├── scheduler/     # 任务调度器
 │   │   ├── store/         # 数据存储层
 │   │   ├── handler/       # 请求处理器
 │   │   │   ├── agent.go   # Agent 对话路由
 │   │   │   └── ...
+│   │   └── tools/         # 工具注册和执行
 │   │   └── system/        # 系统管理（Worker、通知）
 │   ├── worker/
 │   │   ├── executor/      # 任务执行器
@@ -111,7 +121,10 @@ cowork/
 │   ├── user-scenarios.md
 │   ├── status.md
 │   ├── roadmap.md
-│   └── docker-implementation-plan.md
+│   ├── AGENT_REFACTOR_PLAN.md  # 原重构计划（已完成）
+│   └── superpowers/       # 新架构设计文档
+│       ├── specs/         # 规范文档
+│       └── plans/         # 计划文档
 └── scripts/               # 构建脚本
 ```
 

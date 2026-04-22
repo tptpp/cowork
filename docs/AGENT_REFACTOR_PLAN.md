@@ -1,5 +1,17 @@
 # Cowork Agent 体系重构设计文档
 
+> **Status: COMPLETED (2026-04-16)**
+>
+> This plan has been superseded by the **Agent Architecture Simplification** project.
+> See `docs/superpowers/specs/2026-04-16-agent-architecture-simplification-design.md` for the current architecture.
+>
+> Key changes from this original plan:
+> - TaskDecomposer deleted → Agent uses create_task tool for decomposition
+> - ToolScheduler deleted → Direct Worker mechanism
+> - FunctionCallingEngine deleted → Merged into Agent + LLMClient
+> - Unified Agent structure for Coordinator and Workers
+> - System services layer for automation without model calls
+
 ## 1. 概述
 
 ### 1.1 目标

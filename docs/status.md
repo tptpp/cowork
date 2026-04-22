@@ -39,9 +39,9 @@
 | **场景八：节点管理** | 节点注册 | ✅ | NodeRegistry + 心跳机制 |
 | | 能力匹配调度 | ✅ | NodeScheduler 基于 capabilities 分配 |
 | | 节点状态监控 | ✅ | NodeStatusWidget 实时显示 |
-| **场景九：任务树** | 任务拆解 | ✅ | TaskDecomposer 自动拆解复杂请求 |
+| **场景九：任务树** | 任务拆解 | ✅ | Agent 调用 create_task 工具自动拆解复杂请求 |
 | | 依赖关系 | ✅ | TaskDependency + DependencyManager |
-| | 进度追踪 | ✅ | ProgressTracker + Task Tree Widget |
+| | 进度追踪 | ✅ | ProgressMonitor 服务 + Task Tree Widget |
 | | 继承链 | ✅ | root_id + parent_id + template_id |
 
 ## 核心功能检查
@@ -57,7 +57,7 @@
 | 任务日志 | ✅ | 创建和查询 |
 | 任务树可视化 | ✅ | TaskTreeView 组件 |
 | 任务依赖管理 | ✅ | TaskDependency + DependencyManager |
-| 任务拆解 | ✅ | TaskDecomposer 自动拆解 |
+| 任务拆解 | ✅ | Agent 调用 create_task 工具自动拆解 |
 | **调度系统** | | |
 | 优先级调度 | ✅ | high/medium/low |
 | 标签匹配 | ✅ | required_tags 精确匹配 |
@@ -146,7 +146,7 @@
 - NodeRegistry: 节点注册和能力调度
 - ApprovalService: 分级审批系统，自动超时机制
 - TemplateManager: Agent 模板管理，6个系统预置模板
-- TaskDecomposer: 任务自动拆解，依赖管理
+- 系统服务层: ContextInjector, ProgressMonitor, MessageRouter 处理自动化流程
 
 **前端 (React)**:
 - Dashboard: 可拖拽布局，响应式设计，布局持久化
