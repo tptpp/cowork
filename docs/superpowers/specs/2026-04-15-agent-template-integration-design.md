@@ -1,7 +1,15 @@
 # Agent Template Integration Design
 
+> **Status: SUPERSEDED (2026-04-16)**
+>
+> This design is outdated due to the Agent Architecture Simplification project.
+> TaskDecomposer, ToolScheduler, and FunctionCallingEngine have been deleted.
+>
+> See `docs/superpowers/specs/2026-04-16-agent-architecture-simplification-design.md` for the new architecture.
+> Template integration is now handled by the unified Agent structure.
+
 **Date**: 2026-04-15
-**Status**: Approved
+**Original Status**: Approved
 
 ## Overview
 
