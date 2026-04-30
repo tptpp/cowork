@@ -712,17 +712,6 @@ func (c *taskCallback) OnComplete(taskID string, result *executor.TaskResult) {
 }
 
 func main() {
-	// 初始化日志
-	logLevel := os.Getenv("COWORK_LOG_LEVEL")
-	if logLevel == "" {
-		logLevel = "info"
-	}
-	logFormat := os.Getenv("COWORK_LOG_FORMAT")
-	if logFormat == "" {
-		logFormat = "text"
-	}
-	logger.Init(logLevel, logFormat)
-
 	// 基本命令行参数
 	name := flag.String("name", "", "Worker name (required)")
 	tagsStr := flag.String("tags", "", "Worker tags (comma-separated)")
@@ -749,15 +738,33 @@ func main() {
 
 	flag.Parse()
 
+	// 加载配置文件（优先于环境变量）
+	configPath := config.GetSettingFilePath()
+	workerConfigFromFile, globalConfig := loadWorkerConfig(*name, configPath)
+
+	// 日志配置：配置文件 > 环境变量 > 默认值
+	logLevel := globalConfig.LogLevel
+	if logLevel == "" {
+		logLevel = os.Getenv("COWORK_LOG_LEVEL")
+	}
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	logFormat := globalConfig.LogFormat
+	if logFormat == "" {
+		logFormat = os.Getenv("COWORK_LOG_FORMAT")
+	}
+	if logFormat == "" {
+		logFormat = "text"
+	}
+	logger.Init(logLevel, logFormat)
+
 	// 验证必需参数
 	if *name == "" {
 		slog.Error("Worker name is required")
 		os.Exit(1)
 	}
 
-	// 尝试从配置文件加载配置
-	configPath := config.GetSettingFilePath()
-	workerConfig := loadWorkerConfig(*name, configPath)
 
 	// 合并配置：命令行参数优先
 	cfg := &WorkerConfig{
@@ -772,8 +779,8 @@ func main() {
 	// 标签配置
 	if *tagsStr != "" {
 		cfg.Tags = utils.ParseStringList(*tagsStr)
-	} else if len(workerConfig.Tags) > 0 {
-		cfg.Tags = workerConfig.Tags
+	} else if len(workerConfigFromFile.Tags) > 0 {
+		cfg.Tags = workerConfigFromFile.Tags
 	} else {
 		slog.Error("Worker tags are required")
 		os.Exit(1)
@@ -782,21 +789,21 @@ func main() {
 	// AI 配置合并
 	if *aiBaseURL != "" {
 		cfg.AIBaseURL = *aiBaseURL
-	} else if workerConfig.AIBaseURL != "" {
-		cfg.AIBaseURL = workerConfig.AIBaseURL
+	} else if workerConfigFromFile.AIBaseURL != "" {
+		cfg.AIBaseURL = workerConfigFromFile.AIBaseURL
 	}
 
 	if *aiModel != "" {
 		cfg.AIModel = *aiModel
-	} else if workerConfig.AIModel != "" {
-		cfg.AIModel = workerConfig.AIModel
+	} else if workerConfigFromFile.AIModel != "" {
+		cfg.AIModel = workerConfigFromFile.AIModel
 	}
 
 	// API Key: 命令行 > 配置文件 > 环境变量
 	if *aiAPIKey != "" {
 		cfg.AIAPIKey = *aiAPIKey
-	} else if workerConfig.AIAPIKey != "" {
-		cfg.AIAPIKey = utils.ExpandEnvVars(workerConfig.AIAPIKey)
+	} else if workerConfigFromFile.AIAPIKey != "" {
+		cfg.AIAPIKey = utils.ExpandEnvVars(workerConfigFromFile.AIAPIKey)
 	} else {
 		cfg.AIAPIKey = os.Getenv("AI_API_KEY")
 	}
@@ -811,8 +818,8 @@ func main() {
 			os.Exit(1)
 		}
 		cfg.SystemPrompt = string(data)
-	} else if workerConfig.SystemPrompt != "" {
-		cfg.SystemPrompt = workerConfig.SystemPrompt
+	} else if workerConfigFromFile.SystemPrompt != "" {
+		cfg.SystemPrompt = workerConfigFromFile.SystemPrompt
 	} else {
 		// 默认系统提示词
 		cfg.SystemPrompt = getDefaultSystemPrompt(cfg.Name)
@@ -820,19 +827,19 @@ func main() {
 
 	// 其他 AI 配置
 	cfg.AIMaxTokens = *aiMaxTokens
-	if workerConfig.AIMaxTokens > 0 && *aiMaxTokens == 4096 {
-		cfg.AIMaxTokens = workerConfig.AIMaxTokens
+	if workerConfigFromFile.AIMaxTokens > 0 && *aiMaxTokens == 4096 {
+		cfg.AIMaxTokens = workerConfigFromFile.AIMaxTokens
 	}
 	cfg.AITemperature = *aiTemperature
-	if workerConfig.AITemperature > 0 && *aiTemperature == 0.7 {
-		cfg.AITemperature = workerConfig.AITemperature
+	if workerConfigFromFile.AITemperature > 0 && *aiTemperature == 0.7 {
+		cfg.AITemperature = workerConfigFromFile.AITemperature
 	}
 
 	// 描述配置
 	if *description != "" {
 		cfg.Description = *description
-	} else if workerConfig.Description != "" {
-		cfg.Description = workerConfig.Description
+	} else if workerConfigFromFile.Description != "" {
+		cfg.Description = workerConfigFromFile.Description
 	}
 
 	// 工具配置
@@ -844,8 +851,8 @@ func main() {
 
 	if *allowedPathsStr != "" {
 		cfg.AllowedPaths = utils.ParseStringList(*allowedPathsStr)
-	} else if len(workerConfig.AllowedPaths) > 0 {
-		cfg.AllowedPaths = workerConfig.AllowedPaths
+	} else if len(workerConfigFromFile.AllowedPaths) > 0 {
+		cfg.AllowedPaths = workerConfigFromFile.AllowedPaths
 	}
 	cfg.ShellTimeout = *shellTimeout
 
@@ -888,35 +895,73 @@ type WorkerConfigFromFile struct {
 	AllowedPaths   []string `json:"allowed_paths"`
 }
 
+// GlobalConfig 全局配置
+type GlobalConfig struct {
+	LogLevel   string          `json:"log_level"`
+	LogFormat  string          `json:"log_format"`
+	Docker     DockerFileConfig `json:"docker"`
+}
+
+// DockerFileConfig Docker 配置（从配置文件读取）
+type DockerFileConfig struct {
+	Enabled         bool    `json:"enabled"`
+	DefaultImage    string  `json:"default_image"`
+	CPULimit        float64 `json:"cpu_limit"`
+	MemoryLimit     string  `json:"memory_limit"`
+	NetworkDisabled bool    `json:"network_disabled"`
+	Timeout         string  `json:"timeout"`
+}
+
 // SettingFile 配置文件结构
 type SettingFile struct {
-	Workers map[string]WorkerConfigFromFile `json:"worker"`
+	Global   GlobalConfig                `json:"global"`
+	Workers  map[string]WorkerConfigFromFile `json:"worker"`
+	Coordinator CoordinatorConfigFromFile `json:"coordinator"` // 可引用 Coordinator 配置
+}
+
+// CoordinatorConfigFromFile Coordinator 配置（Worker 可使用）
+type CoordinatorConfigFromFile struct {
+	Models map[string]ModelConfigFromFile `json:"models"`
+}
+
+// ModelConfigFromFile 模型配置
+type ModelConfigFromFile struct {
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model"`
 }
 
 // loadWorkerConfig 从配置文件加载 Worker 配置
-func loadWorkerConfig(name, configPath string) WorkerConfigFromFile {
-	var cfg WorkerConfigFromFile
+func loadWorkerConfig(name, configPath string) (WorkerConfigFromFile, GlobalConfig) {
+	var workerCfg WorkerConfigFromFile
+	var globalCfg GlobalConfig
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Warn("Failed to read config file", "path", configPath, "error", err)
 		}
-		return cfg
+		return workerCfg, globalCfg
 	}
 
 	var settings SettingFile
 	if err := json.Unmarshal(data, &settings); err != nil {
 		slog.Warn("Failed to parse config file", "path", configPath, "error", err)
-		return cfg
+		return workerCfg, globalCfg
 	}
 
-	if workerCfg, ok := settings.Workers[name]; ok {
-		cfg = workerCfg
+	globalCfg = settings.Global
+
+	if w, ok := settings.Workers[name]; ok {
+		workerCfg = w
+		// 展开环境变量
+		if workerCfg.AIAPIKey != "" {
+			workerCfg.AIAPIKey = utils.ExpandEnvVars(workerCfg.AIAPIKey)
+		}
 		slog.Info("Loaded config from file", "worker", name)
 	}
 
-	return cfg
+	return workerCfg, globalCfg
 }
 
 // getDefaultSystemPrompt 获取默认系统提示词

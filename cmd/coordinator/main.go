@@ -39,14 +39,36 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// AuthConfig 认证配置
+type AuthConfig struct {
+	APIKeys   []string `json:"api_keys"`   // API Key 列表，格式: "key:description"
+	JWTSecret string   `json:"jwt_secret"` // JWT 密钥
+}
+
+// ModelConfig 模型配置
+type ModelConfig struct {
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model"`
+}
+
 // CoordinatorConfig 协调者配置
 type CoordinatorConfig struct {
-	AIBaseURL string `json:"ai_base_url"`
-	AIModel   string `json:"ai_model"`
-	AIAPIKey  string `json:"ai_api_key"`
+	Addr        string                 `json:"addr"`         // 服务地址
+	DBPath      string                 `json:"db_path"`      // 数据库路径
+	LogLevel    string                 `json:"log_level"`    // 日志级别
+	LogFormat   string                 `json:"log_format"`   // 日志格式
+	CORSOrigins string                 `json:"cors_origins"` // CORS 允许的来源
+	Auth        AuthConfig             `json:"auth"`         // 认证配置
+	Models      map[string]ModelConfig `json:"models"`       // 多模型配置
 
 	// 调度器配置
 	Scheduler SchedulerConfig `json:"scheduler"`
+
+	// 旧配置字段（向后兼容）
+	AIBaseURL string `json:"ai_base_url"`
+	AIModel   string `json:"ai_model"`
+	AIAPIKey  string `json:"ai_api_key"`
 }
 
 // SchedulerConfig 调度器配置
@@ -60,6 +82,17 @@ type SchedulerConfig struct {
 // SettingFile 配置文件结构
 type SettingFile struct {
 	Coordinator CoordinatorConfig `json:"coordinator"`
+	Docker      DockerConfig      `json:"docker"` // Docker 全局配置
+}
+
+// DockerConfig Docker 配置（全局默认）
+type DockerConfig struct {
+	Enabled         bool    `json:"enabled"`
+	DefaultImage    string  `json:"default_image"`
+	CPULimit        float64 `json:"cpu_limit"`
+	MemoryLimit     string  `json:"memory_limit"`
+	NetworkDisabled bool    `json:"network_disabled"`
+	Timeout         string  `json:"timeout"`
 }
 
 // loadCoordinatorConfig 从配置文件加载 Coordinator 配置
@@ -81,34 +114,56 @@ func loadCoordinatorConfig(configPath string) CoordinatorConfig {
 	}
 
 	cfg = settings.Coordinator
+
+	// 展开环境变量引用
 	if cfg.AIAPIKey != "" {
 		cfg.AIAPIKey = utils.ExpandEnvVars(cfg.AIAPIKey)
 	}
+	for name, model := range cfg.Models {
+		if model.APIKey != "" {
+			model.APIKey = utils.ExpandEnvVars(model.APIKey)
+			cfg.Models[name] = model
+		}
+	}
+	for i, key := range cfg.Auth.APIKeys {
+		cfg.Auth.APIKeys[i] = utils.ExpandEnvVars(key)
+	}
+	if cfg.Auth.JWTSecret != "" {
+		cfg.Auth.JWTSecret = utils.ExpandEnvVars(cfg.Auth.JWTSecret)
+	}
 
-	slog.Info("Loaded coordinator config from file", "ai_model", cfg.AIModel)
+	slog.Info("Loaded coordinator config from file", "models", len(cfg.Models))
 	return cfg
 }
 
 func main() {
-	// 初始化日志
-	logLevel := os.Getenv("COWORK_LOG_LEVEL")
+	// 加载配置文件（优先于环境变量）
+	configPath := config.GetSettingFilePath()
+	coordCfg := loadCoordinatorConfig(configPath)
+
+	// 日志配置：配置文件 > 环境变量 > 默认值
+	logLevel := coordCfg.LogLevel
+	if logLevel == "" {
+		logLevel = os.Getenv("COWORK_LOG_LEVEL")
+	}
 	if logLevel == "" {
 		logLevel = "info"
 	}
-	logFormat := os.Getenv("COWORK_LOG_FORMAT")
+	logFormat := coordCfg.LogFormat
+	if logFormat == "" {
+		logFormat = os.Getenv("COWORK_LOG_FORMAT")
+	}
 	if logFormat == "" {
 		logFormat = "text"
 	}
 	logger.Init(logLevel, logFormat)
 
-	// 加载配置文件
-	configPath := config.GetSettingFilePath()
-	coordCfg := loadCoordinatorConfig(configPath)
-
-	// 初始化数据库
-	dbPath := os.Getenv("COWORK_DB_PATH")
+	// 数据库路径：配置文件 > 环境变量 > 默认值
+	dbPath := coordCfg.DBPath
 	if dbPath == "" {
-		// 使用 ~/.cowork/coordinator/cowork.db 作为默认数据库路径
+		dbPath = os.Getenv("COWORK_DB_PATH")
+	}
+	if dbPath == "" {
 		dbPath = config.GetCoordinatorDBPath()
 	}
 
@@ -233,9 +288,18 @@ func main() {
 		toolRegistry,
 	)
 
-	// 从配置文件加载 AI 配置
+	// 从配置文件加载 AI 配置（支持多模型）
+	// 1. 先加载 Models 配置
+	if len(coordCfg.Models) > 0 {
+		for name, modelCfg := range coordCfg.Models {
+			if modelCfg.BaseURL != "" && modelCfg.Model != "" && modelCfg.APIKey != "" {
+				h.SetAIConfig(name, modelCfg.BaseURL, modelCfg.Model, modelCfg.APIKey)
+				slog.Info("AI model loaded from config", "name", name, "model", modelCfg.Model)
+			}
+		}
+	}
+	// 2. 向后兼容：加载旧的单模型配置
 	if coordCfg.AIBaseURL != "" && coordCfg.AIModel != "" && coordCfg.AIAPIKey != "" {
-		// 根据配置推断模型类型
 		modelType := "default"
 		if strings.Contains(coordCfg.AIModel, "gpt") || strings.Contains(coordCfg.AIBaseURL, "openai") {
 			modelType = "openai"
@@ -245,7 +309,7 @@ func main() {
 			modelType = "glm"
 		}
 		h.SetAIConfig(modelType, coordCfg.AIBaseURL, coordCfg.AIModel, coordCfg.AIAPIKey)
-		slog.Info("AI config loaded from file", "type", modelType, "model", coordCfg.AIModel)
+		slog.Info("AI config loaded from legacy fields", "type", modelType, "model", coordCfg.AIModel)
 
 		// 初始化 LLMClient 和 Coordinator
 		llmClient := agent.NewLLMClient(
@@ -270,27 +334,30 @@ func main() {
 		slog.Info("Coordinator initialized with unified Agent structure")
 	}
 
-		// 初始化系统服务
-		contextInjector := service.NewContextInjector(store.NewTaskStore(s.DB()))
-		progressMonitor := service.NewProgressMonitor(hub)
-		messageRouter := service.NewMessageRouter(
-			store.NewMessageStore(s.DB()),
-			store.NewTaskStore(s.DB()),
-		)
+	// 初始化系统服务
+	contextInjector := service.NewContextInjector(store.NewTaskStore(s.DB()))
+	progressMonitor := service.NewProgressMonitor(hub)
+	messageRouter := service.NewMessageRouter(
+		store.NewMessageStore(s.DB()),
+		store.NewTaskStore(s.DB()),
+	)
 
-		slog.Info("System services initialized",
-			"hasContextInjector", contextInjector != nil,
-			"hasProgressMonitor", progressMonitor != nil,
-			"hasMessageRouter", messageRouter != nil,
-		)
+	slog.Info("System services initialized",
+		"hasContextInjector", contextInjector != nil,
+		"hasProgressMonitor", progressMonitor != nil,
+		"hasMessageRouter", messageRouter != nil,
+	)
 
 	// 创建 Gin 路由
 	r := gin.New()
 	r.Use(sloggin.New(slog.Default()))
 	r.Use(gin.Recovery())
 
-	// CORS 配置
-	corsOrigins := os.Getenv("COWORK_CORS_ORIGINS")
+	// CORS 配置：配置文件 > 环境变量 > 默认值
+	corsOrigins := coordCfg.CORSOrigins
+	if corsOrigins == "" {
+		corsOrigins = os.Getenv("COWORK_CORS_ORIGINS")
+	}
 	if corsOrigins == "" {
 		corsOrigins = "*" // 默认允许所有来源
 	}
@@ -304,6 +371,13 @@ func main() {
 
 	// API 认证配置
 	authConfig := middleware.DefaultAuthConfig()
+	// 从配置文件加载认证信息
+	if len(coordCfg.Auth.APIKeys) > 0 {
+		authConfig.APIKeys = middleware.ParseAPIKeys(coordCfg.Auth.APIKeys)
+	}
+	if coordCfg.Auth.JWTSecret != "" {
+		authConfig.JWTSecret = coordCfg.Auth.JWTSecret
+	}
 	if len(authConfig.APIKeys) > 0 {
 		slog.Info("API Key authentication enabled", "count", len(authConfig.APIKeys))
 	}
@@ -426,8 +500,11 @@ func main() {
 		})
 	}
 
-	// 启动 HTTP 服务器
-	addr := os.Getenv("COWORK_ADDR")
+	// 服务地址：配置文件 > 环境变量 > 默认值
+	addr := coordCfg.Addr
+	if addr == "" {
+		addr = os.Getenv("COWORK_ADDR")
+	}
 	if addr == "" {
 		addr = ":8080"
 	}

@@ -130,6 +130,28 @@ cowork/
 
 ## 快速开始
 
+### 配置
+
+配置文件位于 `~/.cowork/setting.json`，首次运行会自动创建。可参考 `setting.example.json`：
+
+```bash
+# 复制示例配置
+cp setting.example.json ~/.cowork/setting.json
+
+# 编辑配置（填入实际的 API Key）
+vim ~/.cowork/setting.json
+```
+
+配置支持环境变量引用，如 `${OPENAI_API_KEY}`。
+
+主要配置项：
+- `coordinator.models` - 多模型配置（OpenAI/Anthropic/GLM）
+- `coordinator.auth` - API 认证配置
+- `global.docker` - Docker 执行器配置
+- `worker` - Worker 特定配置
+
+### 启动服务
+
 ```bash
 # 启动 Coordinator
 go run ./cmd/coordinator

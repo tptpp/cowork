@@ -20,7 +20,22 @@ type AuthConfig struct {
 	SkipPrefixes []string
 }
 
-// DefaultAuthConfig 默认认证配置
+// ParseAPIKeys 解析 API Key 列表
+// 输入格式: ["key1:description1", "key2:description2"] 或 ["key1", "key2"]
+func ParseAPIKeys(keys []string) map[string]string {
+	apiKeys := make(map[string]string)
+	for _, pair := range keys {
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) == 2 {
+			apiKeys[parts[0]] = parts[1]
+		} else if len(parts) == 1 && parts[0] != "" {
+			apiKeys[parts[0]] = "default"
+		}
+	}
+	return apiKeys
+}
+
+// DefaultAuthConfig 默认认证配置（从环境变量读取）
 func DefaultAuthConfig() AuthConfig {
 	// 从环境变量读取 API Keys
 	// 格式: key1:desc1,key2:desc2

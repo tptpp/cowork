@@ -1,0 +1,61 @@
+{
+  "coordinator": {
+    "addr": ":8080",
+    "db_path": "~/.cowork/coordinator/cowork.db",
+    "log_level": "info",
+    "log_format": "text",
+    "cors_origins": "*",
+    "auth": {
+      "api_keys": [],
+      "jwt_secret": ""
+    },
+    "models": {
+      "openai": {
+        "api_key": "${OPENAI_API_KEY}",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4"
+      },
+      "anthropic": {
+        "api_key": "${ANTHROPIC_API_KEY}",
+        "base_url": "https://api.anthropic.com/v1",
+        "model": "claude-3-sonnet-20240229"
+      },
+      "glm": {
+        "api_key": "${GLM_API_KEY}",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-4"
+      }
+    },
+    "scheduler": {
+      "poll_interval": "5s",
+      "worker_timeout": "30s",
+      "max_retry_attempts": 3,
+      "task_timeout": "1h"
+    }
+  },
+  "global": {
+    "log_level": "info",
+    "log_format": "text",
+    "docker": {
+      "enabled": false,
+      "default_image": "alpine:latest",
+      "cpu_limit": 1.0,
+      "memory_limit": "512m",
+      "network_disabled": false,
+      "timeout": "30m"
+    }
+  },
+  "worker": {
+    "default": {
+      "tags": ["dev", "coding"],
+      "ai_base_url": "https://api.openai.com/v1",
+      "ai_model": "gpt-4",
+      "ai_api_key": "${OPENAI_API_KEY}",
+      "system_prompt": "",
+      "ai_max_tokens": 4096,
+      "ai_temperature": 0.7,
+      "description": "Default AI Worker",
+      "allowed_paths": ["~/.cowork/workers/default/workspace"]
+    }
+  }
+}
